@@ -1,65 +1,127 @@
 import os
+import json
 import logging
-from urllib.parse import urlparse, parse_qs
 from aiohttp import web
-from mcp.server import Server
-from mcp.server.models import InitializationOptions
-from mcp.types import Tool, TextContent
-import mcp.server.aiohttp
+import aiohttp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class MCPServer:
     def __init__(self):
-        self.server = Server("minimal-mcp-server")
         self.api_key = None
-        self.setup_handlers()
     
-    def setup_handlers(self):
-        @self.server.list_tools()
-        async def handle_list_tools():
-            return [
-                Tool(
-                    name="get_api_key",
-                    description="Returns the API key extracted from the connection URL",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {},
-                        "required": []
+    async def handle_request(self, message):
+        """Handle JSON-RPC requests."""
+        try:
+            request = json.loads(message)
+            method = request.get("method")
+            request_id = request.get("id")
+            
+            if method == "initialize":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {
+                            "tools": {}
+                        },
+                        "serverInfo": {
+                            "name": "minimal-mcp-server",
+                            "version": "1.0.0"
+                        }
                     }
-                )
-            ]
-        
-        @self.server.call_tool()
-        async def handle_call_tool(name: str, arguments: dict):
-            if name == "get_api_key":
-                if self.api_key:
-                    return [TextContent(type="text", text=f"API Key: {self.api_key}")]
+                }
+            
+            elif method == "tools/list":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "tools": [
+                            {
+                                "name": "get_api_key",
+                                "description": "Returns the API key extracted from the connection URL",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {},
+                                    "required": []
+                                }
+                            }
+                        ]
+                    }
+                }
+            
+            elif method == "tools/call":
+                tool_name = request["params"]["name"]
+                if tool_name == "get_api_key":
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"API Key: {self.api_key}" if self.api_key else "No API key found"
+                                }
+                            ]
+                        }
+                    }
                 else:
-                    return [TextContent(type="text", text="No API key found in connection URL")]
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {
+                            "code": -32601,
+                            "message": f"Unknown tool: {tool_name}"
+                        }
+                    }
+            
             else:
-                raise ValueError(f"Unknown tool: {name}")
-
-async def extract_api_key(request: web.Request) -> str:
-    """Extract API key from URL query parameters."""
-    api_key = request.query.get('api_key')
-    if api_key:
-        logger.info(f"API key extracted from URL: {api_key[:4]}...")
-    return api_key
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32601,
+                        "message": f"Method not found: {method}"
+                    }
+                }
+                
+        except Exception as e:
+            logger.error(f"Error handling request: {e}")
+            return {
+                "jsonrpc": "2.0",
+                "id": request.get("id") if isinstance(request, dict) else None,
+                "error": {
+                    "code": -32603,
+                    "message": str(e)
+                }
+            }
 
 async def handle_mcp(request: web.Request):
     """Handle MCP WebSocket connections with API key extraction."""
-    mcp_server = MCPServer()
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
     
     # Extract API key from URL
-    api_key = await extract_api_key(request)
+    api_key = request.query.get('api_key')
+    if api_key:
+        logger.info(f"API key extracted from URL: {api_key[:4]}...")
+    
+    # Create MCP server instance
+    mcp_server = MCPServer()
     mcp_server.api_key = api_key
     
-    # Handle WebSocket connection
-    async with mcp.server.aiohttp.websocket_handler(request, mcp_server.server) as ws:
-        await ws
+    async for msg in ws:
+        if msg.type == aiohttp.WSMsgType.TEXT:
+            # Handle the request
+            response = await mcp_server.handle_request(msg.data)
+            await ws.send_json(response)
+        elif msg.type == aiohttp.WSMsgType.ERROR:
+            logger.error(f'WebSocket error: {ws.exception()}')
     
+    logger.info('WebSocket connection closed')
     return ws
 
 def create_app():
