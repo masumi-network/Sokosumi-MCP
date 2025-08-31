@@ -8,7 +8,8 @@ Extracts API key and network from URL parameters using ASGI middleware.
 import os
 import logging
 import sys
-from typing import Optional
+from typing import Optional, Dict, Any
+import httpx
 from mcp.server.fastmcp import FastMCP
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -23,7 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Create the FastMCP server instance
-mcp = FastMCP("minimal-mcp-server")
+mcp = FastMCP("sokosumi-mcp")
 
 # Simple in-memory storage for demonstration
 api_keys = {}
@@ -79,6 +80,35 @@ class APIKeyExtractorMiddleware(BaseHTTPMiddleware):
             # Don't fail the request due to middleware errors
             return await call_next(request)
 
+# Helper function to get the base URL based on network
+def get_base_url(network: Optional[str] = None) -> str:
+    """
+    Get the base API URL based on the network.
+    
+    Args:
+        network: The network to use (preprod or mainnet). If None, uses context or defaults to mainnet.
+    
+    Returns:
+        The base URL for the API
+    """
+    if network is None:
+        network = current_network.get() or networks.get('current', 'mainnet')
+    
+    if network == 'preprod':
+        return 'https://preprod.masumi.network/api'
+    else:
+        return 'https://app.masumi.network/api'
+
+# Helper function to get API key
+def get_current_api_key() -> Optional[str]:
+    """
+    Get the current API key from context or storage.
+    
+    Returns:
+        The API key or None if not found
+    """
+    return current_api_key.get() or api_keys.get('current')
+
 @mcp.tool()
 def get_api_key() -> dict:
     """
@@ -113,6 +143,341 @@ def get_api_key() -> dict:
     return {
         "error": "No API key found. Connect with ?api_key=xxx&network=preprod (or mainnet) in URL"
     }
+
+@mcp.tool()
+async def list_agents() -> Dict[str, Any]:
+    """
+    Lists all available AI agents with their pricing and capabilities.
+    
+    Returns:
+        A dictionary containing the list of available agents with their details:
+        - id: Agent identifier
+        - name: Agent name
+        - description: Agent description
+        - status: Agent status
+        - price: Credits required (including fee)
+        - tags: Associated tags
+        - isNew: Whether the agent is new
+        - isShown: Whether the agent is shown
+    """
+    api_key = get_current_api_key()
+    if not api_key:
+        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+    
+    base_url = get_base_url()
+    url = f"{base_url}/v1/agents"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url,
+                headers={"x-api-key": api_key},
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"Successfully retrieved {len(data.get('data', []))} agents")
+                return data
+            else:
+                logger.error(f"Failed to list agents: {response.status_code} - {response.text}")
+                return {
+                    "error": f"Failed to list agents: {response.status_code}",
+                    "details": response.text
+                }
+    except Exception as e:
+        logger.error(f"Error listing agents: {str(e)}")
+        return {
+            "error": "Failed to connect to Sokosumi API",
+            "details": str(e)
+        }
+
+@mcp.tool()
+async def get_agent_input_schema(agent_id: str) -> Dict[str, Any]:
+    """
+    Gets the required input schema for a specific agent.
+    
+    Args:
+        agent_id: The ID of the agent to get the input schema for
+    
+    Returns:
+        The input schema for the agent, describing required parameters
+    """
+    api_key = get_current_api_key()
+    if not api_key:
+        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+    
+    base_url = get_base_url()
+    url = f"{base_url}/v1/agents/{agent_id}/input-schema"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url,
+                headers={"x-api-key": api_key},
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"Successfully retrieved input schema for agent {agent_id}")
+                return data
+            else:
+                logger.error(f"Failed to get input schema: {response.status_code} - {response.text}")
+                return {
+                    "error": f"Failed to get input schema: {response.status_code}",
+                    "details": response.text
+                }
+    except Exception as e:
+        logger.error(f"Error getting input schema: {str(e)}")
+        return {
+            "error": "Failed to connect to Sokosumi API",
+            "details": str(e)
+        }
+
+@mcp.tool()
+async def create_job(
+    agent_id: str,
+    max_accepted_credits: float,
+    input_data: Optional[Dict[str, Any]] = None,
+    name: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Creates a new job for a specific agent.
+    
+    Args:
+        agent_id: The ID of the agent to create a job for
+        max_accepted_credits: Maximum credits you're willing to pay for this job
+        input_data: Input data for the agent (must match agent's input schema)
+        name: Optional name for the job
+    
+    Returns:
+        The created job details including job ID and status
+    """
+    api_key = get_current_api_key()
+    if not api_key:
+        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+    
+    base_url = get_base_url()
+    url = f"{base_url}/v1/agents/{agent_id}/jobs"
+    
+    # Prepare request body
+    body = {
+        "maxAcceptedCredits": max_accepted_credits
+    }
+    if input_data is not None:
+        body["inputData"] = input_data
+    if name is not None:
+        body["name"] = name
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url,
+                json=body,
+                headers={"x-api-key": api_key},
+                timeout=30.0
+            )
+            
+            if response.status_code in [200, 201]:
+                data = response.json()
+                logger.info(f"Successfully created job {data.get('data', {}).get('id')} for agent {agent_id}")
+                return data
+            else:
+                logger.error(f"Failed to create job: {response.status_code} - {response.text}")
+                return {
+                    "error": f"Failed to create job: {response.status_code}",
+                    "details": response.text
+                }
+    except Exception as e:
+        logger.error(f"Error creating job: {str(e)}")
+        return {
+            "error": "Failed to connect to Sokosumi API",
+            "details": str(e)
+        }
+
+@mcp.tool()
+async def get_job(job_id: str) -> Dict[str, Any]:
+    """
+    Retrieves status and results for a specific job.
+    
+    Args:
+        job_id: The ID of the job to retrieve
+    
+    Returns:
+        Job details including:
+        - status: Current job status
+        - output: Job output (if completed)
+        - input: Original input data
+        - price: Credits charged
+        - timestamps: Various job lifecycle timestamps
+    """
+    api_key = get_current_api_key()
+    if not api_key:
+        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+    
+    base_url = get_base_url()
+    url = f"{base_url}/v1/jobs/{job_id}"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url,
+                headers={"x-api-key": api_key},
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"Successfully retrieved job {job_id}")
+                return data
+            else:
+                logger.error(f"Failed to get job: {response.status_code} - {response.text}")
+                return {
+                    "error": f"Failed to get job: {response.status_code}",
+                    "details": response.text
+                }
+    except Exception as e:
+        logger.error(f"Error getting job: {str(e)}")
+        return {
+            "error": "Failed to connect to Sokosumi API",
+            "details": str(e)
+        }
+
+@mcp.tool()
+async def list_jobs() -> Dict[str, Any]:
+    """
+    Lists all jobs for the authenticated user.
+    
+    Returns:
+        List of all jobs with their details including:
+        - id: Job identifier
+        - status: Current job status
+        - agentId: Associated agent
+        - name: Job name (if set)
+        - input/output: Job data
+        - timestamps: Job lifecycle times
+    """
+    api_key = get_current_api_key()
+    if not api_key:
+        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+    
+    base_url = get_base_url()
+    url = f"{base_url}/v1/jobs"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url,
+                headers={"x-api-key": api_key},
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"Successfully retrieved {len(data.get('data', []))} jobs")
+                return data
+            else:
+                logger.error(f"Failed to list jobs: {response.status_code} - {response.text}")
+                return {
+                    "error": f"Failed to list jobs: {response.status_code}",
+                    "details": response.text
+                }
+    except Exception as e:
+        logger.error(f"Error listing jobs: {str(e)}")
+        return {
+            "error": "Failed to connect to Sokosumi API",
+            "details": str(e)
+        }
+
+@mcp.tool()
+async def list_agent_jobs(agent_id: str) -> Dict[str, Any]:
+    """
+    Lists all jobs for a specific agent belonging to the authenticated user.
+    
+    Args:
+        agent_id: The ID of the agent to list jobs for
+    
+    Returns:
+        List of jobs for the specified agent with full job details
+    """
+    api_key = get_current_api_key()
+    if not api_key:
+        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+    
+    base_url = get_base_url()
+    url = f"{base_url}/v1/agents/{agent_id}/jobs"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url,
+                headers={"x-api-key": api_key},
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"Successfully retrieved {len(data.get('data', []))} jobs for agent {agent_id}")
+                return data
+            else:
+                logger.error(f"Failed to list agent jobs: {response.status_code} - {response.text}")
+                return {
+                    "error": f"Failed to list agent jobs: {response.status_code}",
+                    "details": response.text
+                }
+    except Exception as e:
+        logger.error(f"Error listing agent jobs: {str(e)}")
+        return {
+            "error": "Failed to connect to Sokosumi API",
+            "details": str(e)
+        }
+
+@mcp.tool()
+async def get_user_profile() -> Dict[str, Any]:
+    """
+    Gets the current user's profile information.
+    
+    Returns:
+        User profile including:
+        - id: User identifier
+        - name: User's name
+        - email: User's email
+        - termsAccepted: Terms acceptance status
+        - marketingOptIn: Marketing preference
+        - timestamps: Account creation/update times
+    """
+    api_key = get_current_api_key()
+    if not api_key:
+        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+    
+    base_url = get_base_url()
+    url = f"{base_url}/v1/users/me"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url,
+                headers={"x-api-key": api_key},
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"Successfully retrieved user profile")
+                return data
+            else:
+                logger.error(f"Failed to get user profile: {response.status_code} - {response.text}")
+                return {
+                    "error": f"Failed to get user profile: {response.status_code}",
+                    "details": response.text
+                }
+    except Exception as e:
+        logger.error(f"Error getting user profile: {str(e)}")
+        return {
+            "error": "Failed to connect to Sokosumi API",
+            "details": str(e)
+        }
 
 if __name__ == "__main__":
     import uvicorn

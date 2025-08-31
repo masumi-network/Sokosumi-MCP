@@ -1,7 +1,7 @@
-# MCP Server Context
+# Sokosumi MCP Server
 
 ## Overview
-Minimal MCP (Model Context Protocol) server using FastMCP with dual transport support (stdio for local, Streamable HTTP for remote). Following best practices for deploying remote MCP servers.
+MCP (Model Context Protocol) server for the Sokosumi AI agent platform. Provides tools to interact with Sokosumi's AI agents, create jobs, and monitor execution. Built with FastMCP and dual transport support (stdio for local, Streamable HTTP for remote).
 
 ## Architecture Type
 This is a **Remote MCP Server** implementation, which according to industry guides represents the future direction of MCP:
@@ -19,14 +19,21 @@ This is a **Remote MCP Server** implementation, which according to industry guid
 - **Parameter extraction from URL**: ASGI middleware automatically extracts:
   - API keys from `?api_key=xxx` query parameter
   - Network from `?network=preprod` or `?network=mainnet` (defaults to mainnet)
-- Tools available:
-  - `get_api_key()`: Returns both API key and network as a dictionary
+- **Sokosumi API Integration**: Full suite of tools for AI agent job management:
+  - `get_api_key()`: Returns both API key and network configuration
+  - `list_agents()`: Browse available AI agents with pricing
+  - `get_agent_input_schema(agent_id)`: Get required input parameters for an agent
+  - `create_job(agent_id, max_accepted_credits, input_data, name)`: Submit a new job
+  - `get_job(job_id)`: Check job status and retrieve results
+  - `list_jobs()`: View all your jobs
+  - `list_agent_jobs(agent_id)`: View jobs for a specific agent
+  - `get_user_profile()`: Get your account information
 
 ## Deployment Modes
 
 ### 1. Railway/Cloud Run (HTTP) - Production
 When deployed with PORT env var set, uses Streamable HTTP transport:
-- **Endpoint**: `https://your-app-url/mcp` (Streamable HTTP endpoint)
+- **Endpoint**: `https://sokosumi-mcp-production.up.railway.app/mcp` (Streamable HTTP endpoint)
 - **Transport**: Streamable HTTP (the modern standard)
 - **Protocol**: MCP 2025-06-18 specification
 - **Access**: Remote MCP clients via HTTP
@@ -38,11 +45,12 @@ When run locally without PORT env var:
 - **Use Case**: Development and testing
 
 ## Files
-- `server.py` - FastMCP server with dual transport support and API key middleware
-- `requirements.txt` - Python dependencies (mcp>=1.2.0, uvicorn>=0.30.0, starlette>=0.37.0)
+- `server.py` - FastMCP server with Sokosumi API integration
+- `requirements.txt` - Python dependencies (mcp>=1.2.0, uvicorn>=0.30.0, starlette>=0.37.0, httpx>=0.25.0)
 - `railway.json` - Railway deployment configuration
 - `Procfile` - Railway start command
 - `test_client.py` - Test client for stdio transport
+- `CONTEXT.md` - This documentation file
 
 ## How to Connect
 
@@ -51,12 +59,12 @@ Until clients support remote servers directly:
 ```json
 {
   "mcpServers": {
-    "my-server": {
+    "sokosumi": {
       "command": "npx",
       "args": [
         "-y",
         "mcp-remote",
-        "https://your-railway-app.up.railway.app/mcp?api_key=your-api-key-here&network=mainnet"
+        "https://sokosumi-mcp-production.up.railway.app/mcp?api_key=YOUR_API_KEY&network=mainnet"
       ]
     }
   }
@@ -66,16 +74,16 @@ Until clients support remote servers directly:
 ### Direct Remote Connection with API Key (Future)
 When clients support remote MCP servers:
 ```
-https://your-railway-app.up.railway.app/mcp?api_key=your-api-key-here&network=mainnet
+https://sokosumi-mcp-production.up.railway.app/mcp?api_key=YOUR_API_KEY&network=mainnet
 ```
 
-The API key and network will be automatically extracted from the URL and made available via the `get_api_key()` tool, which returns a dictionary containing both values.
+The API key and network will be automatically extracted from the URL and made available to all tools.
 
 ### Local Development
 ```json
 {
   "mcpServers": {
-    "minimal-mcp": {
+    "sokosumi-local": {
       "command": "python",
       "args": ["/path/to/server.py"]
     }
@@ -83,15 +91,50 @@ The API key and network will be automatically extracted from the URL and made av
 }
 ```
 
+## Available Tools
+
+### 1. `get_api_key()`
+Returns the current API key and network configuration.
+
+### 2. `list_agents()`
+Lists all available AI agents with:
+- Agent ID, name, and description
+- Pricing in credits (including fees)
+- Status and availability
+- Tags for categorization
+
+### 3. `get_agent_input_schema(agent_id)`
+Gets the required input schema for a specific agent before creating a job.
+
+### 4. `create_job(agent_id, max_accepted_credits, input_data, name)`
+Creates a new job for an agent:
+- `agent_id`: The agent to use
+- `max_accepted_credits`: Maximum credits you're willing to pay
+- `input_data`: Input parameters (must match agent's schema)
+- `name`: Optional job name for tracking
+
+### 5. `get_job(job_id)`
+Retrieves a specific job's status and results:
+- Current status (pending, running, completed, failed)
+- Output data (when completed)
+- Execution timestamps
+- Credits charged
+
+### 6. `list_jobs()`
+Lists all jobs for your account with full details.
+
+### 7. `list_agent_jobs(agent_id)`
+Lists all jobs for a specific agent.
+
+### 8. `get_user_profile()`
+Gets your account information including name, email, and preferences.
+
 ## Testing
 
 ### Test with curl
 ```bash
-# Streamable HTTP endpoint
-curl https://your-railway-app.up.railway.app/mcp
-
-# Test with POST for Streamable HTTP (with full parameters)
-curl -X POST "https://your-railway-app.up.railway.app/mcp?api_key=YOUR_KEY&network=mainnet" \
+# Initialize connection with API key and network
+curl -X POST "https://sokosumi-mcp-production.up.railway.app/mcp?api_key=YOUR_KEY&network=mainnet" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{
@@ -116,16 +159,16 @@ python server.py  # Runs as stdio server
 python test_client.py  # In another terminal
 ```
 
-## Current Limitations vs Production-Ready
+## Current Status
 
 | Feature | Current Status | Production Needs |
 |---------|---------------|------------------|
 | Transport | ✅ Streamable HTTP | ✅ Complete |
-| Tools | ✅ API key/network retrieval | Ready for API integration |
-| Authentication | ⚠️ Basic API key | OAuth 2.1 with PKCE |
+| Tools | ✅ Full Sokosumi API integration | ✅ Complete |
+| Authentication | ✅ API key via header | ✅ Complete |
 | Session Management | ⚠️ In-memory | Redis or database |
 | Parameter Extraction | ✅ API key & network from URL | ✅ Complete |
-| Error Handling | ⚠️ Basic | JSON-RPC compliant errors |
+| Error Handling | ✅ Comprehensive | ✅ Complete |
 | Logging | ✅ stderr logging | ✅ Complete |
 | CORS | ⚠️ Partial | Full CORS headers |
 
@@ -138,8 +181,12 @@ python test_client.py  # In another terminal
 - **Parameter Middleware**: ASGI middleware (`APIKeyExtractorMiddleware`) automatically extracts parameters from URL:
   - Intercepts incoming requests and checks for `?api_key=xxx` and `?network=preprod/mainnet`
   - Stores extracted values in context variables for request-scoped access
-  - `get_api_key()` tool returns both values as a dictionary
   - Uses Starlette's `BaseHTTPMiddleware` for request interception
+- **Sokosumi API Integration**:
+  - Base URLs: `https://preprod.masumi.network/api` (preprod) or `https://app.masumi.network/api` (mainnet)
+  - Authentication via `x-api-key` header
+  - All API calls use async httpx client with 30s timeout
+  - Comprehensive error handling and logging
 
 ## Why FastMCP?
 Based on best practices and official examples:
@@ -159,9 +206,10 @@ Based on best practices and official examples:
    - Replace in-memory dict with database
    - Add session management with Redis
 
-3. **API Integration**
-   - Connect to actual blockchain APIs based on network parameter
-   - Add error handling for API calls
+3. **Enhanced Features**
+   - Add job status polling/monitoring
+   - Implement job cancellation
+   - Add batch job submission
    - Implement rate limiting per API key
 
 4. **Monitoring**
@@ -170,6 +218,7 @@ Based on best practices and official examples:
    - Set up alerting
 
 ## References
-- [Google Cloud Run MCP Tutorial](https://cloud.google.com/run/docs/tutorials/deploy-remote-mcp-server)
+- [Sokosumi Platform](https://app.masumi.network)
 - [MCP Specification](https://modelcontextprotocol.org)
 - [FastMCP Documentation](https://github.com/modelcontextprotocol/python-sdk)
+- [Google Cloud Run MCP Tutorial](https://cloud.google.com/run/docs/tutorials/deploy-remote-mcp-server)
