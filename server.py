@@ -2,11 +2,13 @@
 """
 Minimal MCP server with FastMCP for remote deployment.
 Using Streamable HTTP transport (the modern standard).
+Extracts API key from URL parameters using ASGI middleware.
 """
 
 import os
 import logging
 from mcp.server.fastmcp import FastMCP
+from starlette.middleware.base import BaseHTTPMiddleware
 
 # Set up logging to stderr (important for MCP servers)
 logging.basicConfig(
@@ -23,6 +25,20 @@ mcp = FastMCP("minimal-mcp-server")
 # Simple in-memory storage for demonstration
 # In production, use a database or persistent storage
 api_keys = {}
+
+# Middleware to extract API key from URL parameters
+class APIKeyExtractorMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        # Extract API key from query parameters
+        api_key = request.query_params.get('api_key')
+        if api_key:
+            # Store the API key globally (in production, use proper session management)
+            api_keys["current"] = api_key
+            logger.info(f"Extracted API key from URL: {api_key[:8]}...")
+        
+        # Continue processing the request
+        response = await call_next(request)
+        return response
 
 @mcp.tool()
 def store_api_key(api_key: str) -> str:
@@ -43,16 +59,20 @@ def store_api_key(api_key: str) -> str:
 @mcp.tool()
 def get_api_key() -> str:
     """
-    Returns the stored API key for this session.
+    Returns the API key from URL parameter or manually stored key.
+    
+    The API key can be:
+    1. Automatically extracted from URL parameter (?api_key=xxx)
+    2. Manually stored using store_api_key tool
     
     Returns:
-        The stored API key or a message if none is stored
+        The API key or a message if none is available
     """
     if "current" in api_keys:
         logger.info("Retrieved API key")
         return f"API Key: {api_keys['current']}"
     logger.warning("No API key found")
-    return "No API key stored. Use store_api_key first."
+    return "No API key found. Connect with ?api_key=xxx in URL or use store_api_key first."
 
 @mcp.tool()
 def test_connection() -> str:
@@ -100,6 +120,10 @@ if __name__ == "__main__":
             # Fall back to SSE if streamable HTTP not available in this SDK version
             logger.warning("Streamable HTTP not available, falling back to SSE transport")
             app = mcp.sse_app()
+        
+        # Add middleware to extract API key from URL parameters
+        app.add_middleware(APIKeyExtractorMiddleware)
+        logger.info("Added API key extraction middleware")
         
         # Run with uvicorn (production-ready ASGI server)
         uvicorn.run(
