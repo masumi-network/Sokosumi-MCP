@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Simple test client for the MCP server."""
+"""Simple test client for the MCP server using HTTP transport."""
 
-import asyncio
+import httpx
 import json
-import websockets
 
-async def test_mcp_server():
-    # Connect with API key in URL
-    uri = "ws://localhost:8080/mcp?api_key=test-key-12345"
+def test_mcp_server():
+    base_url = "http://localhost:8080"
     
-    async with websockets.connect(uri) as websocket:
+    # Test with API key in URL
+    with httpx.Client(base_url=base_url) as client:
         # Initialize connection
         init_request = {
             "jsonrpc": "2.0",
@@ -25,9 +24,8 @@ async def test_mcp_server():
             "id": 1
         }
         
-        await websocket.send(json.dumps(init_request))
-        response = await websocket.recv()
-        print("Initialize response:", json.loads(response))
+        response = client.post("/", json=init_request, params={"api_key": "test-key-12345"})
+        print("Initialize response:", response.json())
         
         # List available tools
         list_tools_request = {
@@ -37,9 +35,8 @@ async def test_mcp_server():
             "id": 2
         }
         
-        await websocket.send(json.dumps(list_tools_request))
-        response = await websocket.recv()
-        print("Tools:", json.loads(response))
+        response = client.post("/", json=list_tools_request, params={"api_key": "test-key-12345"})
+        print("Tools:", response.json())
         
         # Call the get_api_key tool
         call_tool_request = {
@@ -52,9 +49,8 @@ async def test_mcp_server():
             "id": 3
         }
         
-        await websocket.send(json.dumps(call_tool_request))
-        response = await websocket.recv()
-        print("API Key response:", json.loads(response))
+        response = client.post("/", json=call_tool_request, params={"api_key": "test-key-12345"})
+        print("API Key response:", response.json())
 
 if __name__ == "__main__":
-    asyncio.run(test_mcp_server())
+    test_mcp_server()
