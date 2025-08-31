@@ -1,7 +1,7 @@
 # MCP Server Context
 
 ## Overview
-Minimal MCP (Model Context Protocol) server using FastMCP with dual transport support (stdio for local, SSE/HTTP for remote). Following Google Cloud Run's recommended approach for deploying remote MCP servers.
+Minimal MCP (Model Context Protocol) server using FastMCP with dual transport support (stdio for local, Streamable HTTP for remote). Following best practices for deploying remote MCP servers.
 
 ## Architecture Type
 This is a **Remote MCP Server** implementation, which according to industry guides represents the future direction of MCP:
@@ -12,10 +12,10 @@ This is a **Remote MCP Server** implementation, which according to industry guid
 - ✅ Centrally managed
 
 ## Key Features
-- Uses official MCP Python SDK with **FastMCP** (recommended by Google Cloud)
+- Uses official MCP Python SDK with **FastMCP**
 - **Dual transport support**:
   - STDIO transport for local MCP clients (Claude Desktop, etc.)
-  - SSE/HTTP transport for remote access (Railway deployment)
+  - Streamable HTTP transport for remote access (Railway deployment)
 - Tools available:
   - `store_api_key(api_key)`: Store an API key for the session
   - `get_api_key()`: Retrieve the stored API key
@@ -25,10 +25,10 @@ This is a **Remote MCP Server** implementation, which according to industry guid
 ## Deployment Modes
 
 ### 1. Railway/Cloud Run (HTTP) - Production
-When deployed with PORT env var set, uses SSE/HTTP transport:
-- **Endpoint**: `https://your-app-url/sse`
-- **Transport**: Server-Sent Events (SSE) over HTTP
-- **Protocol**: MCP 2024-11-05 (SSE)
+When deployed with PORT env var set, uses Streamable HTTP transport:
+- **Endpoint**: `https://your-app-url/` (exact path depends on SDK version)
+- **Transport**: Streamable HTTP (the modern standard)
+- **Protocol**: MCP 2025-06-18 (Streamable HTTP) or 2024-11-05 (SSE fallback)
 - **Access**: Remote MCP clients via HTTP
 
 ### 2. Local Development (STDIO)
@@ -56,7 +56,7 @@ Until clients support remote servers directly:
       "args": [
         "-y",
         "mcp-remote",
-        "https://your-railway-app.up.railway.app/sse"
+        "https://your-railway-app.up.railway.app/"
       ]
     }
   }
@@ -66,7 +66,7 @@ Until clients support remote servers directly:
 ### Direct Remote Connection (Future)
 When clients support remote MCP servers:
 ```
-https://your-railway-app.up.railway.app/sse
+https://your-railway-app.up.railway.app/
 ```
 
 ### Local Development
@@ -85,11 +85,13 @@ https://your-railway-app.up.railway.app/sse
 
 ### Test with curl
 ```bash
-# Test SSE endpoint
-curl https://your-railway-app.up.railway.app/sse
+# Test endpoint (exact path depends on SDK implementation)
+curl https://your-railway-app.up.railway.app/
 
-# Test with headers
-curl -H "Accept: text/event-stream" https://your-railway-app.up.railway.app/sse
+# Test with POST for Streamable HTTP
+curl -X POST https://your-railway-app.up.railway.app/ \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}'
 ```
 
 ### Local Testing
@@ -103,7 +105,7 @@ python test_client.py  # In another terminal
 
 | Feature | Current Status | Production Needs |
 |---------|---------------|------------------|
-| Transport | ✅ SSE/HTTP | ✅ Complete |
+| Transport | ✅ Streamable HTTP | ✅ Complete |
 | Tools | ✅ Basic demo tools | Would need real API integration |
 | Authentication | ❌ None | OAuth 2.1 with PKCE |
 | Session Management | ⚠️ In-memory | Redis or database |
@@ -112,16 +114,16 @@ python test_client.py  # In another terminal
 | CORS | ⚠️ Partial | Full CORS headers |
 
 ## Implementation Details
-- **FastMCP**: Using Google's recommended FastMCP approach
+- **FastMCP**: Using the recommended FastMCP approach
 - **Transport Detection**: Automatic based on PORT env var
-- **SSE App**: `mcp.sse_app()` creates ASGI app for HTTP
+- **Streamable HTTP**: `mcp.streamable_http_app()` creates ASGI app (with SSE fallback)
 - **Uvicorn**: Production ASGI server for HTTP deployment
 - **Logging**: Properly configured to stderr (not stdout)
 
 ## Why FastMCP?
-Based on Google Cloud's official tutorial and industry best practices:
+Based on best practices and official examples:
 1. **Simpler API**: Decorators for tools make code cleaner
-2. **Built-in Transport**: Handles SSE/stdio automatically
+2. **Built-in Transport**: Handles Streamable HTTP/SSE/stdio automatically
 3. **Production Ready**: Used in Google's official examples
 4. **Type Safety**: Better IDE support and type hints
 

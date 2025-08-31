@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Minimal MCP server with FastMCP for remote deployment.
-Following Google Cloud Run's recommended approach for MCP servers.
+Using Streamable HTTP transport (the modern standard).
 """
 
 import os
@@ -17,10 +17,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Create the FastMCP server instance
-mcp = FastMCP(
-    "minimal-mcp-server",
-    version="1.0.0"
-)
+# Note: FastMCP only accepts name parameter, not version
+mcp = FastMCP("minimal-mcp-server")
 
 # Simple in-memory storage for demonstration
 # In production, use a database or persistent storage
@@ -89,11 +87,19 @@ if __name__ == "__main__":
     port = os.environ.get("PORT")
     
     if port:
-        # Remote deployment - use SSE (Server-Sent Events) transport for HTTP
-        logger.info(f"Starting MCP server with SSE/HTTP transport on port {port}")
+        # Remote deployment - use Streamable HTTP transport (the modern standard)
+        logger.info(f"Starting MCP server with Streamable HTTP transport on port {port}")
         
-        # Get the ASGI app from FastMCP for SSE transport
-        app = mcp.sse_app()
+        # Get the ASGI app from FastMCP for Streamable HTTP transport
+        # This is the 2025-06-18 spec, replacing the older SSE transport
+        try:
+            # Try the newer streamable_http_app method if available
+            app = mcp.streamable_http_app()
+            logger.info("Using Streamable HTTP transport (2025-06-18 spec)")
+        except AttributeError:
+            # Fall back to SSE if streamable HTTP not available in this SDK version
+            logger.warning("Streamable HTTP not available, falling back to SSE transport")
+            app = mcp.sse_app()
         
         # Run with uvicorn (production-ready ASGI server)
         uvicorn.run(
