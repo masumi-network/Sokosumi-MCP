@@ -16,9 +16,10 @@ This is a **Remote MCP Server** implementation, which according to industry guid
 - **Dual transport support**:
   - STDIO transport for local MCP clients (Claude Desktop, etc.)
   - Streamable HTTP transport for remote access (Railway deployment)
+- **API Key extraction from URL**: ASGI middleware automatically extracts API keys from `?api_key=xxx` query parameters
 - Tools available:
   - `store_api_key(api_key)`: Store an API key for the session
-  - `get_api_key()`: Retrieve the stored API key
+  - `get_api_key()`: Retrieve the API key (from URL or manually stored)
   - `test_connection()`: Verify server is running
   - `echo_message(message)`: Echo a message for testing
 
@@ -38,15 +39,15 @@ When run locally without PORT env var:
 - **Use Case**: Development and testing
 
 ## Files
-- `server.py` - FastMCP server with dual transport support
-- `requirements.txt` - Python dependencies (mcp>=1.2.0, uvicorn>=0.30.0)
+- `server.py` - FastMCP server with dual transport support and API key middleware
+- `requirements.txt` - Python dependencies (mcp>=1.2.0, uvicorn>=0.30.0, starlette>=0.37.0)
 - `railway.json` - Railway deployment configuration
 - `Procfile` - Railway start command
 - `test_client.py` - Test client for stdio transport
 
 ## How to Connect
 
-### Using mcp-remote Bridge (Current Method)
+### Using mcp-remote Bridge with API Key
 Until clients support remote servers directly:
 ```json
 {
@@ -56,18 +57,20 @@ Until clients support remote servers directly:
       "args": [
         "-y",
         "mcp-remote",
-        "https://your-railway-app.up.railway.app/"
+        "https://your-railway-app.up.railway.app/?api_key=your-api-key-here"
       ]
     }
   }
 }
 ```
 
-### Direct Remote Connection (Future)
+### Direct Remote Connection with API Key (Future)
 When clients support remote MCP servers:
 ```
-https://your-railway-app.up.railway.app/
+https://your-railway-app.up.railway.app/?api_key=your-api-key-here
 ```
+
+The API key will be automatically extracted from the URL and made available via the `get_api_key()` tool.
 
 ### Local Development
 ```json
@@ -107,8 +110,9 @@ python test_client.py  # In another terminal
 |---------|---------------|------------------|
 | Transport | ✅ Streamable HTTP | ✅ Complete |
 | Tools | ✅ Basic demo tools | Would need real API integration |
-| Authentication | ❌ None | OAuth 2.1 with PKCE |
+| Authentication | ⚠️ Basic API key | OAuth 2.1 with PKCE |
 | Session Management | ⚠️ In-memory | Redis or database |
+| API Key Extraction | ✅ URL parameters | ✅ Complete |
 | Error Handling | ⚠️ Basic | JSON-RPC compliant errors |
 | Logging | ✅ stderr logging | ✅ Complete |
 | CORS | ⚠️ Partial | Full CORS headers |
@@ -119,6 +123,10 @@ python test_client.py  # In another terminal
 - **Streamable HTTP**: `mcp.streamable_http_app()` creates ASGI app (with SSE fallback)
 - **Uvicorn**: Production ASGI server for HTTP deployment
 - **Logging**: Properly configured to stderr (not stdout)
+- **API Key Middleware**: ASGI middleware (`APIKeyExtractorMiddleware`) automatically extracts API keys from URL query parameters
+  - Intercepts incoming requests and checks for `?api_key=xxx`
+  - Stores extracted keys globally for retrieval via `get_api_key()` tool
+  - Uses Starlette's `BaseHTTPMiddleware` for request interception
 
 ## Why FastMCP?
 Based on best practices and official examples:
