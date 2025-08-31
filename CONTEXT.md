@@ -16,12 +16,11 @@ This is a **Remote MCP Server** implementation, which according to industry guid
 - **Dual transport support**:
   - STDIO transport for local MCP clients (Claude Desktop, etc.)
   - Streamable HTTP transport for remote access (Railway deployment)
-- **API Key extraction from URL**: ASGI middleware automatically extracts API keys from `?api_key=xxx` query parameters
+- **Parameter extraction from URL**: ASGI middleware automatically extracts:
+  - API keys from `?api_key=xxx` query parameter
+  - Network from `?network=preprod` or `?network=mainnet` (defaults to mainnet)
 - Tools available:
-  - `store_api_key(api_key)`: Store an API key for the session
-  - `get_api_key()`: Retrieve the API key (from URL or manually stored)
-  - `test_connection()`: Verify server is running
-  - `echo_message(message)`: Echo a message for testing
+  - `get_api_key()`: Returns both API key and network as a dictionary
 
 ## Deployment Modes
 
@@ -57,7 +56,7 @@ Until clients support remote servers directly:
       "args": [
         "-y",
         "mcp-remote",
-        "https://your-railway-app.up.railway.app/mcp?api_key=your-api-key-here"
+        "https://your-railway-app.up.railway.app/mcp?api_key=your-api-key-here&network=mainnet"
       ]
     }
   }
@@ -67,10 +66,10 @@ Until clients support remote servers directly:
 ### Direct Remote Connection with API Key (Future)
 When clients support remote MCP servers:
 ```
-https://your-railway-app.up.railway.app/mcp?api_key=your-api-key-here
+https://your-railway-app.up.railway.app/mcp?api_key=your-api-key-here&network=mainnet
 ```
 
-The API key will be automatically extracted from the URL and made available via the `get_api_key()` tool.
+The API key and network will be automatically extracted from the URL and made available via the `get_api_key()` tool, which returns a dictionary containing both values.
 
 ### Local Development
 ```json
@@ -91,10 +90,23 @@ The API key will be automatically extracted from the URL and made available via 
 # Streamable HTTP endpoint
 curl https://your-railway-app.up.railway.app/mcp
 
-# Test with POST for Streamable HTTP
-curl -X POST https://your-railway-app.up.railway.app/mcp \
+# Test with POST for Streamable HTTP (with full parameters)
+curl -X POST "https://your-railway-app.up.railway.app/mcp?api_key=YOUR_KEY&network=mainnet" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}'
+  -H "Accept: application/json, text/event-stream" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": {},
+      "clientInfo": {
+        "name": "test-client",
+        "version": "1.0.0"
+      }
+    },
+    "id": 1
+  }'
 ```
 
 ### Local Testing
@@ -109,10 +121,10 @@ python test_client.py  # In another terminal
 | Feature | Current Status | Production Needs |
 |---------|---------------|------------------|
 | Transport | ✅ Streamable HTTP | ✅ Complete |
-| Tools | ✅ Basic demo tools | Would need real API integration |
+| Tools | ✅ API key/network retrieval | Ready for API integration |
 | Authentication | ⚠️ Basic API key | OAuth 2.1 with PKCE |
 | Session Management | ⚠️ In-memory | Redis or database |
-| API Key Extraction | ✅ URL parameters | ✅ Complete |
+| Parameter Extraction | ✅ API key & network from URL | ✅ Complete |
 | Error Handling | ⚠️ Basic | JSON-RPC compliant errors |
 | Logging | ✅ stderr logging | ✅ Complete |
 | CORS | ⚠️ Partial | Full CORS headers |
@@ -123,9 +135,10 @@ python test_client.py  # In another terminal
 - **Streamable HTTP**: `mcp.streamable_http_app()` creates ASGI app for modern HTTP transport
 - **Uvicorn**: Production ASGI server for HTTP deployment
 - **Logging**: Properly configured to stderr (not stdout)
-- **API Key Middleware**: ASGI middleware (`APIKeyExtractorMiddleware`) automatically extracts API keys from URL query parameters
-  - Intercepts incoming requests and checks for `?api_key=xxx`
-  - Stores extracted keys globally for retrieval via `get_api_key()` tool
+- **Parameter Middleware**: ASGI middleware (`APIKeyExtractorMiddleware`) automatically extracts parameters from URL:
+  - Intercepts incoming requests and checks for `?api_key=xxx` and `?network=preprod/mainnet`
+  - Stores extracted values in context variables for request-scoped access
+  - `get_api_key()` tool returns both values as a dictionary
   - Uses Starlette's `BaseHTTPMiddleware` for request interception
 
 ## Why FastMCP?
@@ -146,10 +159,10 @@ Based on best practices and official examples:
    - Replace in-memory dict with database
    - Add session management with Redis
 
-3. **Real Tools**
-   - Connect to actual APIs
-   - Add error handling
-   - Implement rate limiting
+3. **API Integration**
+   - Connect to actual blockchain APIs based on network parameter
+   - Add error handling for API calls
+   - Implement rate limiting per API key
 
 4. **Monitoring**
    - Add health checks

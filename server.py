@@ -2,7 +2,7 @@
 """
 Minimal MCP server with FastMCP for remote deployment.
 Using Streamable HTTP transport (the modern standard).
-Extracts API key from URL parameters using ASGI middleware.
+Extracts API key and network from URL parameters using ASGI middleware.
 """
 
 import os
@@ -27,30 +27,49 @@ mcp = FastMCP("minimal-mcp-server")
 
 # Simple in-memory storage for demonstration
 api_keys = {}
+networks = {}
 
-# Context variable to store request-specific data
+# Context variables to store request-specific data
 current_api_key: ContextVar[Optional[str]] = ContextVar('current_api_key', default=None)
+current_network: ContextVar[Optional[str]] = ContextVar('current_network', default=None)
 
-# Middleware to extract API key from URL parameters
+# Middleware to extract API key and network from URL parameters
 class APIKeyExtractorMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        api_token = None
+        network_token = None
         try:
             # Extract API key from query parameters
             api_key = request.query_params.get('api_key')
             if api_key:
                 # Store in context for this request
-                token = current_api_key.set(api_key)
+                api_token = current_api_key.set(api_key)
                 # Also store globally for demo purposes
                 api_keys["current"] = api_key
                 logger.info(f"Extracted API key from URL: {api_key[:8]}..." if len(api_key) > 8 else "API key extracted")
+            
+            # Extract network from query parameters (preprod or mainnet)
+            network = request.query_params.get('network', 'mainnet')  # Default to mainnet
+            if network not in ['preprod', 'mainnet']:
+                network = 'mainnet'  # Default to mainnet if invalid value
+            # Store in context for this request
+            network_token = current_network.set(network)
+            # Also store globally for demo purposes
+            networks["current"] = network
+            logger.info(f"Using network: {network}")
             
             # Continue processing the request
             response = await call_next(request)
             
             # Clean up context if we set it
-            if api_key:
+            if api_token:
                 try:
-                    current_api_key.reset(token)
+                    current_api_key.reset(api_token)
+                except:
+                    pass
+            if network_token:
+                try:
+                    current_network.reset(network_token)
                 except:
                     pass
                 
@@ -61,71 +80,39 @@ class APIKeyExtractorMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
 @mcp.tool()
-def store_api_key(api_key: str) -> str:
+def get_api_key() -> dict:
     """
-    Store an API key for this session.
+    Returns the API key and network from URL parameters.
     
-    Args:
-        api_key: The API key to store
-        
-    Returns:
-        Confirmation message
-    """
-    # In a real implementation, you'd want to associate this with a session ID
-    api_keys["current"] = api_key
-    logger.info(f"Stored API key: {api_key[:4]}...")
-    return f"API key stored: {api_key[:4]}..." if len(api_key) > 4 else "API key stored"
-
-@mcp.tool()
-def get_api_key() -> str:
-    """
-    Returns the API key from URL parameter or manually stored key.
-    
-    The API key can be:
-    1. Automatically extracted from URL parameter (?api_key=xxx)
-    2. Manually stored using store_api_key tool
+    The API key is extracted from the URL parameter (?api_key=xxx)
+    The network is extracted from the URL parameter (?network=preprod or ?network=mainnet)
     
     Returns:
-        The API key or a message if none is available
+        A dictionary containing the API key and network, or error message
     """
-    # Try context variable first (current request)
+    # Try context variables first (current request)
     ctx_key = current_api_key.get()
+    ctx_network = current_network.get()
+    
     if ctx_key:
-        logger.info("Retrieved API key from context")
-        return f"API Key: {ctx_key}"
+        logger.info(f"Retrieved API key from context, network: {ctx_network}")
+        return {
+            "api_key": ctx_key,
+            "network": ctx_network or "mainnet"
+        }
     
     # Fall back to global storage
     if "current" in api_keys:
-        logger.info("Retrieved API key from storage")
-        return f"API Key: {api_keys['current']}"
+        logger.info(f"Retrieved API key from storage, network: {networks.get('current', 'mainnet')}")
+        return {
+            "api_key": api_keys['current'],
+            "network": networks.get('current', 'mainnet')
+        }
     
     logger.warning("No API key found")
-    return "No API key found. Connect with ?api_key=xxx in URL or use store_api_key first."
-
-@mcp.tool()
-def test_connection() -> str:
-    """
-    Test that the MCP server is working.
-    
-    Returns:
-        Success message
-    """
-    logger.info("Connection test successful")
-    return "MCP server is running successfully!"
-
-@mcp.tool()
-def echo_message(message: str) -> str:
-    """
-    Echo back a message to test the connection.
-    
-    Args:
-        message: The message to echo
-        
-    Returns:
-        The echoed message
-    """
-    logger.info(f"Echoing message: {message}")
-    return f"Echo: {message}"
+    return {
+        "error": "No API key found. Connect with ?api_key=xxx&network=preprod (or mainnet) in URL"
+    }
 
 if __name__ == "__main__":
     import uvicorn
