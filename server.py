@@ -27,5 +27,17 @@ def test_connection() -> str:
     return "MCP server is running successfully!"
 
 if __name__ == "__main__":
-    # Run with stdio transport (default for MCP servers)
-    mcp.run(transport='stdio')
+    import sys
+    import uvicorn
+    
+    # Check if we're running on Railway (PORT env var is set)
+    port = os.environ.get("PORT")
+    
+    if port:
+        # Railway deployment - use SSE (Server-Sent Events) transport for HTTP
+        print(f"Starting MCP server with SSE/HTTP transport on port {port}", file=sys.stderr)
+        app = mcp.sse_app()
+        uvicorn.run(app, host="0.0.0.0", port=int(port))
+    else:
+        # Local development - use stdio transport
+        mcp.run(transport='stdio')
