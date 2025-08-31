@@ -183,7 +183,7 @@ python test_client.py  # In another terminal
   - Stores extracted values in context variables for request-scoped access
   - Uses Starlette's `BaseHTTPMiddleware` for request interception
 - **Sokosumi API Integration**:
-  - Base URLs: `https://preprod.masumi.network/api` (preprod) or `https://app.masumi.network/api` (mainnet)
+  - Base URLs: `https://preprod.sokosumi.com/api` (preprod) or `https://app.sokosumi.com/api` (mainnet)
   - Authentication via `x-api-key` header
   - All API calls use async httpx client with 30s timeout
   - Comprehensive error handling and logging
@@ -218,7 +218,7 @@ Based on best practices and official examples:
    - Set up alerting
 
 ## References
-- [Sokosumi Platform](https://app.masumi.network)
+- [Sokosumi Platform](https://app.sokosumi.com)
 - [MCP Specification](https://modelcontextprotocol.org)
 - [FastMCP Documentation](https://github.com/modelcontextprotocol/python-sdk)
 - [Google Cloud Run MCP Tutorial](https://cloud.google.com/run/docs/tutorials/deploy-remote-mcp-server)

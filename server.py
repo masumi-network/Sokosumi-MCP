@@ -95,9 +95,9 @@ def get_base_url(network: Optional[str] = None) -> str:
         network = current_network.get() or networks.get('current', 'mainnet')
     
     if network == 'preprod':
-        return 'https://preprod.masumi.network/api'
+        return 'https://preprod.sokosumi.com/api'
     else:
-        return 'https://app.masumi.network/api'
+        return 'https://app.sokosumi.com/api'
 
 # Helper function to get API key
 def get_current_api_key() -> Optional[str]:
