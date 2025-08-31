@@ -1,32 +1,31 @@
 #!/usr/bin/env python
 """
 Minimal MCP server with FastMCP for remote deployment.
-Using Streamable HTTP transport (the modern standard).
+Using SSE transport for compatibility.
 Extracts API key from URL parameters using ASGI middleware.
 """
 
 import os
 import logging
+import sys
 from typing import Optional
 from mcp.server.fastmcp import FastMCP
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from contextvars import ContextVar
 
-# Set up logging to stderr (important for MCP servers)
+# Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]  # This goes to stderr by default
+    stream=sys.stderr
 )
 logger = logging.getLogger(__name__)
 
 # Create the FastMCP server instance
-# Note: FastMCP only accepts name parameter, not version
 mcp = FastMCP("minimal-mcp-server")
 
 # Simple in-memory storage for demonstration
-# In production, use a database or persistent storage
 api_keys = {}
 
 # Context variable to store request-specific data
@@ -50,7 +49,10 @@ class APIKeyExtractorMiddleware(BaseHTTPMiddleware):
             
             # Clean up context if we set it
             if api_key:
-                current_api_key.reset(token)
+                try:
+                    current_api_key.reset(token)
+                except:
+                    pass
                 
             return response
         except Exception as e:
@@ -126,42 +128,36 @@ def echo_message(message: str) -> str:
     return f"Echo: {message}"
 
 if __name__ == "__main__":
-    import sys
     import uvicorn
     
-    # Check if we're running on Railway or Cloud Run (PORT env var is set)
+    # Check if we're running on Railway (PORT env var is set)
     port = os.environ.get("PORT")
     
     if port:
-        # Remote deployment - use Streamable HTTP transport (the modern standard)
-        logger.info(f"Starting MCP server with Streamable HTTP transport on port {port}")
+        # Remote deployment - use SSE transport for now
+        logger.info(f"Starting MCP server on port {port}")
         
-        # Get the ASGI app from FastMCP for Streamable HTTP transport
-        # This is the 2025-06-18 spec, replacing the older SSE transport
         try:
-            # Try the newer streamable_http_app method if available
-            app = mcp.streamable_http_app()
-            logger.info("Using Streamable HTTP transport (2025-06-18 spec)")
-        except AttributeError:
-            # Fall back to SSE if streamable HTTP not available in this SDK version
-            logger.warning("Streamable HTTP not available, falling back to SSE transport")
+            # Get the ASGI app from FastMCP
+            # SSE is more widely supported currently
             app = mcp.sse_app()
-        
-        # Add middleware to extract API key from URL parameters
-        app.add_middleware(APIKeyExtractorMiddleware)
-        logger.info("Added API key extraction middleware")
-        
-        # Run with uvicorn (production-ready ASGI server)
-        uvicorn.run(
-            app, 
-            host="0.0.0.0",  # Listen on all interfaces
-            port=int(port),
-            log_level="info",
-            access_log=True,
-            # Important for Railway/Cloud Run
-            workers=1,
-            loop="asyncio"
-        )
+            logger.info("Using SSE transport")
+            
+            # Add middleware to extract API key from URL parameters
+            app.add_middleware(APIKeyExtractorMiddleware)
+            logger.info("Added API key extraction middleware")
+            
+            # Run with uvicorn
+            uvicorn.run(
+                app, 
+                host="0.0.0.0",
+                port=int(port),
+                log_level="info",
+                access_log=True
+            )
+        except Exception as e:
+            logger.error(f"Failed to start server: {e}")
+            sys.exit(1)
     else:
         # Local development - use stdio transport
         logger.info("Starting MCP server with stdio transport for local development")
