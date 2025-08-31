@@ -1,7 +1,7 @@
 # MCP Server Context
 
 ## Overview
-Minimal MCP (Model Context Protocol) server using FastMCP with dual transport support (stdio for local, SSE for remote). Following best practices for deploying remote MCP servers.
+Minimal MCP (Model Context Protocol) server using FastMCP with dual transport support (stdio for local, Streamable HTTP for remote). Following best practices for deploying remote MCP servers.
 
 ## Architecture Type
 This is a **Remote MCP Server** implementation, which according to industry guides represents the future direction of MCP:
@@ -26,11 +26,11 @@ This is a **Remote MCP Server** implementation, which according to industry guid
 ## Deployment Modes
 
 ### 1. Railway/Cloud Run (HTTP) - Production
-When deployed with PORT env var set, uses SSE transport:
-- **Endpoint**: `https://your-app-url/sse` (SSE endpoint)
-- **Transport**: SSE (Server-Sent Events)
-- **Protocol**: MCP with SSE transport
-- **Access**: Remote MCP clients via HTTP/SSE
+When deployed with PORT env var set, uses Streamable HTTP transport:
+- **Endpoint**: `https://your-app-url/mcp` (Streamable HTTP endpoint)
+- **Transport**: Streamable HTTP (the modern standard)
+- **Protocol**: MCP 2025-06-18 specification
+- **Access**: Remote MCP clients via HTTP
 
 ### 2. Local Development (STDIO)
 When run locally without PORT env var:
@@ -57,7 +57,7 @@ Until clients support remote servers directly:
       "args": [
         "-y",
         "mcp-remote",
-        "https://your-railway-app.up.railway.app/?api_key=your-api-key-here"
+        "https://your-railway-app.up.railway.app/mcp?api_key=your-api-key-here"
       ]
     }
   }
@@ -67,7 +67,7 @@ Until clients support remote servers directly:
 ### Direct Remote Connection with API Key (Future)
 When clients support remote MCP servers:
 ```
-https://your-railway-app.up.railway.app/?api_key=your-api-key-here
+https://your-railway-app.up.railway.app/mcp?api_key=your-api-key-here
 ```
 
 The API key will be automatically extracted from the URL and made available via the `get_api_key()` tool.
@@ -88,11 +88,13 @@ The API key will be automatically extracted from the URL and made available via 
 
 ### Test with curl
 ```bash
-# SSE endpoint (will hang - this is expected for SSE)
-curl https://your-railway-app.up.railway.app/sse
+# Streamable HTTP endpoint
+curl https://your-railway-app.up.railway.app/mcp
 
-# SSE requires a proper SSE client or mcp-remote bridge
-# Direct curl testing is limited with SSE transport
+# Test with POST for Streamable HTTP
+curl -X POST https://your-railway-app.up.railway.app/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}'
 ```
 
 ### Local Testing
@@ -106,7 +108,7 @@ python test_client.py  # In another terminal
 
 | Feature | Current Status | Production Needs |
 |---------|---------------|------------------|
-| Transport | ✅ SSE (Server-Sent Events) | Works, but Streamable HTTP is preferred |
+| Transport | ✅ Streamable HTTP | ✅ Complete |
 | Tools | ✅ Basic demo tools | Would need real API integration |
 | Authentication | ⚠️ Basic API key | OAuth 2.1 with PKCE |
 | Session Management | ⚠️ In-memory | Redis or database |
@@ -118,7 +120,7 @@ python test_client.py  # In another terminal
 ## Implementation Details
 - **FastMCP**: Using the recommended FastMCP approach
 - **Transport Detection**: Automatic based on PORT env var
-- **SSE Transport**: `mcp.sse_app()` creates ASGI app for Server-Sent Events
+- **Streamable HTTP**: `mcp.streamable_http_app()` creates ASGI app for modern HTTP transport
 - **Uvicorn**: Production ASGI server for HTTP deployment
 - **Logging**: Properly configured to stderr (not stdout)
 - **API Key Middleware**: ASGI middleware (`APIKeyExtractorMiddleware`) automatically extracts API keys from URL query parameters

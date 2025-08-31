@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Minimal MCP server with FastMCP for remote deployment.
-Using SSE transport for compatibility.
+Using Streamable HTTP transport (the modern standard).
 Extracts API key from URL parameters using ASGI middleware.
 """
 
@@ -134,14 +134,14 @@ if __name__ == "__main__":
     port = os.environ.get("PORT")
     
     if port:
-        # Remote deployment - use SSE transport for now
+        # Remote deployment - use Streamable HTTP transport
         logger.info(f"Starting MCP server on port {port}")
         
         try:
-            # Get the ASGI app from FastMCP
-            # SSE is more widely supported currently
-            app = mcp.sse_app()
-            logger.info("Using SSE transport")
+            # Get the ASGI app from FastMCP for Streamable HTTP
+            # This is the modern standard (2025-06-18 spec)
+            app = mcp.streamable_http_app()
+            logger.info("Using Streamable HTTP transport")
             
             # Add middleware to extract API key from URL parameters
             app.add_middleware(APIKeyExtractorMiddleware)
