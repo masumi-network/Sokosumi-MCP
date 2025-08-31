@@ -1,56 +1,44 @@
 #!/usr/bin/env python3
-"""Simple test client for the MCP server using HTTP transport."""
+"""Test client for the MCP server using stdio transport."""
 
-import httpx
-import json
+import asyncio
+import sys
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
-def test_mcp_server():
-    base_url = "http://localhost:8080"
+async def test_mcp_server():
+    """Test the MCP server functionality."""
+    # Create server parameters for stdio connection
+    server_params = StdioServerParameters(
+        command="python",
+        args=["server.py"]
+    )
     
-    # Test with API key in URL
-    with httpx.Client(base_url=base_url) as client:
-        # Initialize connection
-        init_request = {
-            "jsonrpc": "2.0",
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {
-                    "name": "test-client",
-                    "version": "1.0.0"
-                }
-            },
-            "id": 1
-        }
-        
-        response = client.post("/", json=init_request, params={"api_key": "test-key-12345"})
-        print("Initialize response:", response.json())
-        
-        # List available tools
-        list_tools_request = {
-            "jsonrpc": "2.0",
-            "method": "tools/list",
-            "params": {},
-            "id": 2
-        }
-        
-        response = client.post("/", json=list_tools_request, params={"api_key": "test-key-12345"})
-        print("Tools:", response.json())
-        
-        # Call the get_api_key tool
-        call_tool_request = {
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {
-                "name": "get_api_key",
-                "arguments": {}
-            },
-            "id": 3
-        }
-        
-        response = client.post("/", json=call_tool_request, params={"api_key": "test-key-12345"})
-        print("API Key response:", response.json())
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            # Initialize the connection
+            await session.initialize()
+            
+            # List available tools
+            tools = await session.list_tools()
+            print("Available tools:")
+            for tool in tools.tools:
+                print(f"  - {tool.name}: {tool.description}")
+            
+            # Test the connection
+            result = await session.call_tool("test_connection", arguments={})
+            print(f"\nTest connection result: {result.content[0].text}")
+            
+            # Store an API key
+            result = await session.call_tool(
+                "store_api_key", 
+                arguments={"api_key": "test-key-12345"}
+            )
+            print(f"Store API key result: {result.content[0].text}")
+            
+            # Retrieve the API key
+            result = await session.call_tool("get_api_key", arguments={})
+            print(f"Get API key result: {result.content[0].text}")
 
 if __name__ == "__main__":
-    test_mcp_server()
+    asyncio.run(test_mcp_server())

@@ -1,48 +1,58 @@
 # MCP Server Context
 
 ## Overview
-Minimal MCP (Model Context Protocol) server using FastMCP with streamable HTTP transport for Railway deployment.
+Minimal MCP (Model Context Protocol) server using FastMCP with stdio transport.
 
 ## Key Features
 - Uses official MCP Python SDK with FastMCP
-- Streamable HTTP transport (recommended for production)
+- STDIO transport (standard for MCP servers)
 - Three tools for API key management and testing:
   - `store_api_key(api_key)`: Store an API key for the session
   - `get_api_key()`: Retrieve the stored API key
   - `test_connection()`: Verify server is running
 
-## Connection
-Connect via HTTP: `https://your-railway-url/`
+## Important Note on Deployment
+**MCP servers with stdio transport are designed to be run as subprocesses by MCP clients, not as standalone HTTP servers.** 
+
+Railway is designed for HTTP services, so this MCP server **cannot be deployed directly on Railway** as originally intended. Instead, MCP servers are typically:
+1. Run locally by MCP clients (like Claude Desktop)
+2. Packaged and distributed for users to run locally
+3. Wrapped in an HTTP adapter if web deployment is needed
 
 ## Files
 - `server.py` - FastMCP server implementation with tools
 - `requirements.txt` - Python dependencies (mcp>=1.2.0)
-- `railway.json` - Railway deployment configuration
-- `Procfile` - Railway start command
-- `test_client.py` - HTTP test client using httpx
+- `railway.json` - Railway deployment configuration (not applicable for stdio)
+- `Procfile` - Railway start command (not applicable for stdio)
+- `test_client.py` - Test client (needs updating for stdio)
 
-## Local Testing
+## Local Testing with MCP Client
 ```bash
 pip install -r requirements.txt
-python server.py  # Runs on port 8080
-pip install httpx  # For test client
-python test_client.py  # In another terminal
+python server.py  # Runs as stdio server
 ```
 
-## Railway Deployment
-- Auto-deploys from main branch
-- Uses PORT environment variable (defaults to 8080)
-- HTTP endpoint: `https://[your-app].up.railway.app/`
+To connect from an MCP client like Claude Desktop, configure it to run:
+```json
+{
+  "mcpServers": {
+    "minimal-mcp": {
+      "command": "python",
+      "args": ["/path/to/server.py"]
+    }
+  }
+}
+```
 
 ## API Key Usage
-Since MCP doesn't support URL query parameter extraction in FastMCP without custom transport implementation, the server provides:
+The server provides:
 1. `store_api_key` tool to store an API key
 2. `get_api_key` tool to retrieve the stored key
 3. Simple in-memory storage (dict) for demonstration
 
 ## Implementation Details
 - Uses `FastMCP` from `mcp.server.fastmcp`
-- Streamable HTTP transport for production deployments
+- STDIO transport for communication with MCP clients
 - Simple in-memory storage for API keys
 
 ## Future Enhancements

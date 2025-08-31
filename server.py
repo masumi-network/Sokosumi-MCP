@@ -27,10 +27,5 @@ def test_connection() -> str:
     return "MCP server is running successfully!"
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    # Run with streamable HTTP transport for Railway deployment
-    mcp.run(
-        transport="streamable-http",
-        host="0.0.0.0",
-        port=port
-    )
+    # Run with stdio transport (default for MCP servers)
+    mcp.run(transport='stdio')
