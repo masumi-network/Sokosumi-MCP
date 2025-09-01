@@ -344,51 +344,6 @@ async def get_job(job_id: str) -> Dict[str, Any]:
             "details": str(e)
         }
 
-@mcp.tool()
-async def list_jobs() -> Dict[str, Any]:
-    """
-    Lists all jobs for the authenticated user.
-    
-    Returns:
-        List of all jobs with their details including:
-        - id: Job identifier
-        - status: Current job status
-        - agentId: Associated agent
-        - name: Job name (if set)
-        - input/output: Job data
-        - timestamps: Job lifecycle times
-    """
-    api_key = get_current_api_key()
-    if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
-    
-    base_url = get_base_url()
-    url = f"{base_url}/v1/jobs"
-    
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                url,
-                headers={"x-api-key": api_key},
-                timeout=30.0
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                logger.info(f"Successfully retrieved {len(data.get('data', []))} jobs")
-                return data
-            else:
-                logger.error(f"Failed to list jobs: {response.status_code} - {response.text}")
-                return {
-                    "error": f"Failed to list jobs: {response.status_code}",
-                    "details": response.text
-                }
-    except Exception as e:
-        logger.error(f"Error listing jobs: {str(e)}")
-        return {
-            "error": "Failed to connect to Sokosumi API",
-            "details": str(e)
-        }
 
 @mcp.tool()
 async def list_agent_jobs(agent_id: str) -> Dict[str, Any]:

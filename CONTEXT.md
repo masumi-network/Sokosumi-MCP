@@ -25,7 +25,6 @@ This is a **Remote MCP Server** implementation, which according to industry guid
   - `get_agent_input_schema(agent_id)`: Get required input parameters for an agent
   - `create_job(agent_id, max_accepted_credits, input_data, name)`: Submit a new job
   - `get_job(job_id)`: Check job status and retrieve results
-  - `list_jobs()`: View all your jobs
   - `list_agent_jobs(agent_id)`: View jobs for a specific agent
   - `get_user_profile()`: Get your account information
 
@@ -120,13 +119,10 @@ Retrieves a specific job's status and results:
 - Execution timestamps
 - Credits charged
 
-### 6. `list_jobs()`
-Lists all jobs for your account with full details.
-
-### 7. `list_agent_jobs(agent_id)`
+### 6. `list_agent_jobs(agent_id)`
 Lists all jobs for a specific agent.
 
-### 8. `get_user_profile()`
+### 7. `get_user_profile()`
 Gets your account information including name, email, and preferences.
 
 ## Testing
