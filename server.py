@@ -109,40 +109,91 @@ def get_current_api_key() -> Optional[str]:
     """
     return current_api_key.get() or api_keys.get('current')
 
-@mcp.tool()
-def get_api_key() -> dict:
+# Resources
+@mcp.resource("masumi://input-schema-standard")
+def get_masumi_input_schema_standard() -> str:
     """
-    Returns the API key and network from URL parameters.
+    Masumi Input Schema Standard documentation.
     
-    The API key is extracted from the URL parameter (?api_key=xxx)
-    The network is extracted from the URL parameter (?network=preprod or ?network=mainnet)
-    
-    Returns:
-        A dictionary containing the API key and network, or error message
+    Returns the MIP-003 standard for agent input schemas, which defines
+    how agents should structure their input requirements.
     """
-    # Try context variables first (current request)
-    ctx_key = current_api_key.get()
-    ctx_network = current_network.get()
+    return """
+    # Masumi Input Schema Standard (MIP-003)
     
-    if ctx_key:
-        logger.info(f"Retrieved API key from context, network: {ctx_network}")
-        return {
-            "api_key": ctx_key,
-            "network": ctx_network or "mainnet"
-        }
+    Reference: https://github.com/masumi-network/masumi-improvement-proposals/blob/main/MIPs/MIP-003/MIP-003-Attachement-01.md
     
-    # Fall back to global storage
-    if "current" in api_keys:
-        logger.info(f"Retrieved API key from storage, network: {networks.get('current', 'mainnet')}")
-        return {
-            "api_key": api_keys['current'],
-            "network": networks.get('current', 'mainnet')
-        }
+    This standard defines how agents should structure their input schemas for the Masumi/Sokosumi platform.
     
-    logger.warning("No API key found")
-    return {
-        "error": "No API key found. Connect with ?api_key=xxx&network=preprod (or mainnet) in URL"
-    }
+    ## Key Points:
+    - Input schemas define the required and optional parameters for agent jobs
+    - Each parameter has a type (string, number, boolean, array, object)
+    - Parameters can have constraints (min/max values, patterns, etc.)
+    - The schema must be validated before job submission
+    
+    Use this resource when:
+    - You need to understand the expected format of agent input schemas
+    - You encounter issues with input validation
+    - You need to construct proper input data for job creation
+    
+    Always check the agent's specific input schema using get_agent_input_schema()
+    before creating a job.
+    """
+
+# Prompts
+@mcp.prompt("hire_agent")
+def hire_agent_prompt() -> str:
+    """
+    Step-by-step guide for hiring an agent on the Sokosumi platform.
+    
+    This prompt provides the recommended workflow for successfully
+    hiring and monitoring agent jobs.
+    """
+    return """
+    # How to Hire an Agent on Sokosumi
+    
+    Follow these steps to successfully hire an agent:
+    
+    ## Step 1: Get the Agent's Input Schema
+    First, retrieve the input schema for your chosen agent:
+    ```
+    get_agent_input_schema(agent_id="<AGENT_ID>")
+    ```
+    This tells you what parameters the agent requires.
+    
+    ## Step 2: Create the Job
+    Submit a job with the required input data:
+    ```
+    create_job(
+        agent_id="<AGENT_ID>",
+        max_accepted_credits=<MAX_CREDITS>,
+        input_data={...},  # Must match the input schema
+        name="Optional job name"
+    )
+    ```
+    Save the returned job_id for tracking.
+    
+    ## Step 3: Monitor Job Status
+    Check the job status repeatedly until completion:
+    ```
+    get_job(job_id="<JOB_ID>")
+    ```
+    
+    **Important timing notes:**
+    - Jobs typically take AT MINIMUM 7 minutes to complete
+    - Some jobs may take much longer (15-30+ minutes)
+    - Keep checking periodically until status shows:
+      - "completed" (success - output will be available)
+      - "failed" (job failed - check error details)
+    - If monitoring for extended periods, consider checking manually later
+    
+    ## Tips:
+    - Always validate your input_data matches the schema before submission
+    - Set max_accepted_credits appropriately based on the agent's pricing
+    - Consider the job processing time when planning your workflow
+    - Save job IDs for future reference
+    """
+
 
 @mcp.tool()
 async def list_agents() -> Dict[str, Any]:

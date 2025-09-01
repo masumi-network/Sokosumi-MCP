@@ -20,13 +20,16 @@ This is a **Remote MCP Server** implementation, which according to industry guid
   - API keys from `?api_key=xxx` query parameter
   - Network from `?network=preprod` or `?network=mainnet` (defaults to mainnet)
 - **Sokosumi API Integration**: Full suite of tools for AI agent job management:
-  - `get_api_key()`: Returns both API key and network configuration
   - `list_agents()`: Browse available AI agents with pricing
   - `get_agent_input_schema(agent_id)`: Get required input parameters for an agent
   - `create_job(agent_id, max_accepted_credits, input_data, name)`: Submit a new job
   - `get_job(job_id)`: Check job status and retrieve results
   - `list_agent_jobs(agent_id)`: View jobs for a specific agent
   - `get_user_profile()`: Get your account information
+- **Resources**:
+  - `masumi://input-schema-standard`: Masumi Input Schema Standard (MIP-003) documentation
+- **Prompts**:
+  - `hire_agent`: Step-by-step guide for hiring agents (get schema → create job → monitor status)
 
 ## Deployment Modes
 
@@ -92,38 +95,56 @@ The API key and network will be automatically extracted from the URL and made av
 
 ## Available Tools
 
-### 1. `get_api_key()`
-Returns the current API key and network configuration.
-
-### 2. `list_agents()`
+### 1. `list_agents()`
 Lists all available AI agents with:
 - Agent ID, name, and description
 - Pricing in credits (including fees)
 - Status and availability
 - Tags for categorization
 
-### 3. `get_agent_input_schema(agent_id)`
+### 2. `get_agent_input_schema(agent_id)`
 Gets the required input schema for a specific agent before creating a job.
 
-### 4. `create_job(agent_id, max_accepted_credits, input_data, name)`
+### 3. `create_job(agent_id, max_accepted_credits, input_data, name)`
 Creates a new job for an agent:
 - `agent_id`: The agent to use
 - `max_accepted_credits`: Maximum credits you're willing to pay
 - `input_data`: Input parameters (must match agent's schema)
 - `name`: Optional job name for tracking
 
-### 5. `get_job(job_id)`
+### 4. `get_job(job_id)`
 Retrieves a specific job's status and results:
 - Current status (pending, running, completed, failed)
 - Output data (when completed)
 - Execution timestamps
 - Credits charged
 
-### 6. `list_agent_jobs(agent_id)`
+### 5. `list_agent_jobs(agent_id)`
 Lists all jobs for a specific agent.
 
-### 7. `get_user_profile()`
+### 6. `get_user_profile()`
 Gets your account information including name, email, and preferences.
+
+## Available Resources
+
+### `masumi://input-schema-standard`
+Provides the Masumi Input Schema Standard (MIP-003) documentation. Use this resource when:
+- Understanding the expected format of agent input schemas
+- Encountering issues with input validation
+- Constructing proper input data for job creation
+
+Reference: [MIP-003 Specification](https://github.com/masumi-network/masumi-improvement-proposals/blob/main/MIPs/MIP-003/MIP-003-Attachement-01.md)
+
+## Available Prompts
+
+### `hire_agent`
+A comprehensive guide for hiring agents on Sokosumi. The recommended workflow is:
+
+1. **Get Agent Input Schema**: Use `get_agent_input_schema(agent_id)` to understand required parameters
+2. **Create Job**: Submit with `create_job()` including validated input data
+3. **Monitor Status**: Poll `get_job(job_id)` until status shows completed or failed
+   - **Note**: Jobs take minimum 7 minutes, often 15-30+ minutes
+   - Keep checking periodically or check manually later for long-running jobs
 
 ## Testing
 
