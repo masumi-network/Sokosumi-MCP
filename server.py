@@ -180,12 +180,14 @@ def hire_agent_prompt() -> str:
     ```
     
     **Important timing notes:**
+    - DO NOT check status immediately - wait at least 3 minutes after job creation
     - Jobs typically take AT MINIMUM 7 minutes to complete
-    - Some jobs may take much longer (15-30+ minutes)
+    - Many jobs take much longer (15-30+ minutes or more)
     - Keep checking periodically until status shows:
       - "completed" (success - output will be available)
       - "failed" (job failed - check error details)
-    - If monitoring for extended periods, consider checking manually later
+    - For long-running jobs, save the job_id and check back later rather than continuous polling
+    - Consider checking every 5-10 minutes for jobs that take longer than expected
     
     ## Tips:
     - Always validate your input_data matches the schema before submission

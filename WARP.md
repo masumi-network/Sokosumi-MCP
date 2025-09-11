@@ -114,11 +114,15 @@ job = await create_job(
     name="optional-job-name"
 )
 
-# 3. Monitor until completion (minimum 7+ minutes)
+# 3. Wait before first status check (minimum 3 minutes)
+# DO NOT check immediately - agents need time to initialize
+
+# 4. Monitor until completion (minimum 7+ minutes total)
 while True:
     status = await get_job(job["data"]["id"])
     if status["data"]["status"] in ["completed", "failed"]:
         break
+    # For long-running jobs, save job_id and check back later
 ```
 
 ## File Structure
@@ -192,10 +196,12 @@ To use with ChatGPT:
 ## Important Constraints
 
 ### Job Processing Times
-- **Minimum**: 7 minutes per job
-- **Typical**: 15-30+ minutes
-- Always poll `get_job()` repeatedly until completion
-- Status values: `pending`, `running`, `completed`, `failed`
+- **Wait before first check**: Minimum 3 minutes after job creation
+- **Total minimum runtime**: 7 minutes per job
+- **Typical runtime**: 15-30+ minutes (many jobs take longer)
+- **Status checking**: Poll `get_job()` every 5-10 minutes, not continuously
+- **Long-running jobs**: Save job_id and check back later rather than waiting
+- **Status values**: `pending`, `running`, `completed`, `failed`
 
 ### API Authentication
 - Production: API keys via URL parameters (`?api_key=xxx`)
