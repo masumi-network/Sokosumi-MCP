@@ -485,6 +485,240 @@ async def get_user_profile() -> Dict[str, Any]:
             "details": str(e)
         }
 
+# ChatGPT Compatibility Tools
+# These tools are required for ChatGPT Connectors and deep research functionality
+
+@mcp.tool()
+async def search(query: str) -> Dict[str, Any]:
+    """
+    Search for relevant Sokosumi AI agents based on a query.
+    
+    This tool is required for ChatGPT compatibility and returns search results
+    in the format expected by ChatGPT Connectors.
+    
+    Args:
+        query: The search query string
+    
+    Returns:
+        MCP content array with JSON-encoded search results containing:
+        - results: Array of result objects with id, title, and url
+    """
+    import json
+    
+    api_key = get_current_api_key()
+    if not api_key:
+        return {
+            "content": [{
+                "type": "text",
+                "text": json.dumps({"error": "No API key found. Please connect with ?api_key=xxx in URL"})
+            }]
+        }
+    
+    # Get all agents first
+    base_url = get_base_url()
+    url = f"{base_url}/v1/agents"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url,
+                headers={"x-api-key": api_key},
+                timeout=30.0
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"Failed to list agents: {response.status_code} - {response.text}")
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": json.dumps({"error": f"Failed to list agents: {response.status_code}"})
+                    }]
+                }
+            
+            data = response.json()
+            agents = data.get('data', [])
+            
+            # Filter agents based on query (simple text matching)
+            query_lower = query.lower()
+            filtered_agents = []
+            
+            for agent in agents:
+                agent_text = f"{agent.get('name', '')} {agent.get('description', '')} {' '.join(agent.get('tags', []))}".lower()
+                if query_lower in agent_text:
+                    filtered_agents.append(agent)
+            
+            # If no matches, return all agents (fallback)
+            if not filtered_agents:
+                filtered_agents = agents
+            
+            # Format results for ChatGPT
+            network = current_network.get() or networks.get('current', 'mainnet')
+            base_agent_url = 'https://app.sokosumi.com' if network == 'mainnet' else 'https://preprod.sokosumi.com'
+            
+            results = []
+            for agent in filtered_agents[:20]:  # Limit to 20 results
+                results.append({
+                    "id": agent.get('id', ''),
+                    "title": f"{agent.get('name', 'Unnamed Agent')} - {agent.get('price', 0)} credits",
+                    "url": f"{base_agent_url}/agents/{agent.get('id', '')}"
+                })
+            
+            logger.info(f"Search for '{query}' returned {len(results)} results")
+            
+            return {
+                "content": [{
+                    "type": "text",
+                    "text": json.dumps({"results": results})
+                }]
+            }
+            
+    except Exception as e:
+        logger.error(f"Error searching agents: {str(e)}")
+        return {
+            "content": [{
+                "type": "text",
+                "text": json.dumps({"error": f"Failed to search agents: {str(e)}"})
+            }]
+        }
+
+@mcp.tool()
+async def fetch(id: str) -> Dict[str, Any]:
+    """
+    Fetch detailed information about a specific Sokosumi AI agent.
+    
+    This tool is required for ChatGPT compatibility and returns full document
+    content in the format expected by ChatGPT Connectors.
+    
+    Args:
+        id: The unique identifier of the agent to fetch
+    
+    Returns:
+        MCP content array with JSON-encoded document containing:
+        - id: Agent identifier
+        - title: Agent name and pricing
+        - text: Full agent details and input schema
+        - url: Link to agent page
+        - metadata: Additional agent metadata
+    """
+    import json
+    
+    api_key = get_current_api_key()
+    if not api_key:
+        return {
+            "content": [{
+                "type": "text",
+                "text": json.dumps({"error": "No API key found. Please connect with ?api_key=xxx in URL"})
+            }]
+        }
+    
+    base_url = get_base_url()
+    
+    try:
+        # Get agent details and input schema in parallel
+        async with httpx.AsyncClient() as client:
+            # Get agent list to find specific agent
+            agents_response = await client.get(
+                f"{base_url}/v1/agents",
+                headers={"x-api-key": api_key},
+                timeout=30.0
+            )
+            
+            if agents_response.status_code != 200:
+                logger.error(f"Failed to list agents: {agents_response.status_code}")
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": json.dumps({"error": f"Failed to fetch agent details: {agents_response.status_code}"})
+                    }]
+                }
+            
+            agents_data = agents_response.json()
+            agents = agents_data.get('data', [])
+            
+            # Find the specific agent
+            agent = None
+            for a in agents:
+                if a.get('id') == id:
+                    agent = a
+                    break
+            
+            if not agent:
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": json.dumps({"error": f"Agent with id '{id}' not found"})
+                    }]
+                }
+            
+            # Get input schema
+            schema_response = await client.get(
+                f"{base_url}/v1/agents/{id}/input-schema",
+                headers={"x-api-key": api_key},
+                timeout=30.0
+            )
+            
+            input_schema = {}
+            if schema_response.status_code == 200:
+                input_schema = schema_response.json().get('data', {})
+            
+            # Format full text content
+            network = current_network.get() or networks.get('current', 'mainnet')
+            base_agent_url = 'https://app.sokosumi.com' if network == 'mainnet' else 'https://preprod.sokosumi.com'
+            
+            # Build comprehensive text description
+            text_parts = []
+            text_parts.append(f"Agent: {agent.get('name', 'Unnamed Agent')}")
+            text_parts.append(f"Description: {agent.get('description', 'No description available')}")
+            text_parts.append(f"Price: {agent.get('price', 0)} credits")
+            text_parts.append(f"Status: {agent.get('status', 'unknown')}")
+            
+            if agent.get('tags'):
+                text_parts.append(f"Tags: {', '.join(agent.get('tags', []))}")
+            
+            if input_schema:
+                text_parts.append("\nInput Schema:")
+                text_parts.append(json.dumps(input_schema, indent=2))
+            
+            text_parts.append(f"\nTo use this agent:")
+            text_parts.append(f"1. Get input schema: get_agent_input_schema('{id}')")
+            text_parts.append(f"2. Create job: create_job(agent_id='{id}', max_accepted_credits={agent.get('price', 100)}, input_data={{...}})")
+            text_parts.append(f"3. Monitor job: get_job(job_id)")
+            
+            full_text = "\n".join(text_parts)
+            
+            result = {
+                "id": id,
+                "title": f"{agent.get('name', 'Unnamed Agent')} - {agent.get('price', 0)} credits",
+                "text": full_text,
+                "url": f"{base_agent_url}/agents/{id}",
+                "metadata": {
+                    "source": "sokosumi_api",
+                    "network": network,
+                    "agent_status": agent.get('status', 'unknown'),
+                    "price_credits": agent.get('price', 0),
+                    "tags": agent.get('tags', []),
+                    "has_input_schema": bool(input_schema)
+                }
+            }
+            
+            logger.info(f"Successfully fetched agent details for {id}")
+            
+            return {
+                "content": [{
+                    "type": "text",
+                    "text": json.dumps(result)
+                }]
+            }
+            
+    except Exception as e:
+        logger.error(f"Error fetching agent {id}: {str(e)}")
+        return {
+            "content": [{
+                "type": "text",
+                "text": json.dumps({"error": f"Failed to fetch agent: {str(e)}"})
+            }]
+        }
+
 if __name__ == "__main__":
     import uvicorn
     
