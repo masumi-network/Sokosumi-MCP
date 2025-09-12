@@ -1,54 +1,111 @@
-# Sokosumi MCP Server
-
 A Model Context Protocol (MCP) server for the [Sokosumi AI agent platform](https://app.sokosumi.com). Provides tools to interact with Sokosumi's AI agents, create jobs, and monitor execution.
 
 
 ## Features
 
-- **Local MCP Server** - Runs locally for Claude Desktop and other MCP clients
+- **One-Click MCP Link Setup** - Generate personalized MCP links with embedded credentials
 - **Sokosumi API Integration** - Complete toolkit for AI agent management  
 - **Modern MCP Standard** - Built with FastMCP and latest MCP specification
+- **ChatGPT Compatibility** - Includes search and fetch tools for ChatGPT Connectors
 
-## Installation & Setup
+## Quick Setup (Recommended)
 
-### Prerequisites
+### Method 1: MCP Link Generation (Easiest)
+
+The fastest way to get started is by generating an MCP link directly from the Sokosumi app:
+
+1. **Generate MCP Link**
+   - Go to your [Sokosumi app](https://app.sokosumi.com)
+   - Click on your profile menu
+   - Select "MCP" from the menu options
+   
+   ![Profile Menu](images/menu.png)
+   
+   - Click "Generate Your Sokosumi MCP URL" button
+   ![Generate MCP URL](images/generate.png)
+   - Copy the generated connection URL
+   ![Claude Desktop Connection](images/connection.png)
+   
+
+2. **Connect to Claude Desktop**
+   - Open Claude Desktop
+   - Go to **Settings** → **Connectors** → **Custom Connector**
+   - Paste your copied connection URL
+   - Click "Connect"
+   
+
+3. **You're Ready!**
+   - The Sokosumi tools are now available in Claude Desktop
+   - No manual configuration files or local server setup required
+
+---
+
+## Alternative Setup Methods
+
+### Method 2: Local Development Setup
+
+For developers who want to run the MCP server locally:
+
+#### Prerequisites
 
 - Python 3.8+ 
 - A [Sokosumi account](https://app.sokosumi.com) with API access
 
-### 1. Clone and Install
+#### Step 1: Clone the Repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/masumi-network/Sokosumi-MCP.git
+```
+
+#### Step 2: Navigate to Project Directory
+
+```bash
 cd Sokosumi-MCP
+```
+
+#### Step 3: Create Virtual Environment
+
+```bash
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+#### Step 4: Activate Virtual Environment
+
+**On macOS/Linux:**
+```bash
+source venv/bin/activate
+```
+
+**On Windows:**
+```bash
+venv\Scripts\activate
+```
+
+#### Step 5: Install Dependencies
+
+```bash
 pip install -r requirements.txt
 ```
 
-### 2. Configuration (Optional)
+#### Step 6: Get Your API Key
 
-For local testing, you can optionally set environment variables:
+1. Visit [Account Settings](https://app.sokosumi.com/account)
+2. Scroll down to the API Keys section
+3. Generate or copy your API key
 
+#### Step 7: Configure Environment Variables
+
+Create environment file:
 ```bash
 cp .env.example .env
 ```
 
 Edit `.env` with your settings:
-
 ```bash
-# Optional: For local testing without Claude Desktop
+# For local development
 SOKOSUMI_API_KEY=your_api_key_here
 SOKOSUMI_NETWORK=mainnet  # or "preprod"
 ```
-
-**Note:** When using with Claude Desktop, API keys are configured in the MCP client configuration.
-
-### 3. Get Your Sokosumi API Key
-
-1. Visit [Account Settings](https://app.sokosumi.com/account)
-2. Scroll down to the API Keys section
-3. Generate or copy your API key
 
 ## How MCP Works
 
@@ -107,9 +164,9 @@ This will:
 - Test basic functionality with dummy data
 - Show expected tool responses
 
-## Setting Up with Claude Desktop
+#### Local Claude Desktop Configuration
 
-Add to your Claude Desktop MCP configuration:
+For local development, add to your Claude Desktop MCP configuration:
 
 **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
@@ -131,6 +188,8 @@ Add to your Claude Desktop MCP configuration:
 
 Replace `/absolute/path/to/Sokosumi-MCP/server.py` with your actual path and restart Claude Desktop.
 
+**Note:** This method is only for local development. For production use, we recommend Method 1 (MCP Link Generation) above.
+
 ## Environment Variables
 
 | Variable | Required | Description | Default |
@@ -150,9 +209,21 @@ Replace `/absolute/path/to/Sokosumi-MCP/server.py` with your actual path and res
 | `get_user_profile()` | Get your account information |
 
 
-## API Reference
+## Troubleshooting
 
-For detailed API documentation, see [CONTEXT.md](CONTEXT.md).
+### Connection Issues
+
+If you're having trouble connecting:
+
+1. **Double-check your MCP link** - Make sure you copied the complete link including the API key parameter
+2. **Verify your API key** - Check that your API key is active in your [Sokosumi Account Settings](https://app.sokosumi.com/account)
+3. **Try reconnecting** - In Claude Desktop, disconnect and reconnect the MCP server
+4. **Check network** - Ensure you're using the correct network (mainnet/preprod) for your account
+
+
+### Advanced Troubleshooting
+
+For detailed debugging information, see Debug Connection Guide.
 
 ## Links
 
