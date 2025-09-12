@@ -1,5 +1,3 @@
-# Debugging MCP Server Connection Issues
-
 ## Common Issues and Solutions
 
 ### 1. Server Shows "Disconnected" in Claude Desktop
