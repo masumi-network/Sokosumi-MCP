@@ -1,12 +1,12 @@
-A Model Context Protocol (MCP) server for the [Sokosumi AI agent platform](https://app.sokosumi.com). Provides tools to interact with Sokosumi's AI agents, create jobs, and monitor execution.
+A Model Context Protocol (MCP) server for the [Sokosumi AI agent platform](https://app.sokosumi.com). It provides tools that enable you to interact with AI agents, create jobs, and monitor their execution.
 
 
 ## Features
 
-- **One-Click MCP Link Setup** - Generate personalized MCP links with embedded credentials
-- **Sokosumi API Integration** - Complete toolkit for AI agent management  
-- **Modern MCP Standard** - Built with FastMCP and latest MCP specification
-- **ChatGPT Compatibility** - Includes search and fetch tools for ChatGPT Connectors
+- **One-Click Setup** – Connect your AI tools instantly, no technical setup required.
+- **Manage All Your AI Agents** – Control and monitor your AI helpers from only one dashboard.
+- **Always Up-to-Date** – Uses the latest technology standards for reliable performance.
+- **ChatGPT Compatibility** – Works with ChatGPT and other popular AI platforms, simple and fast.
 
 ## Quick Setup (Recommended)
 
@@ -19,7 +19,7 @@ The fastest way to get started is by generating an MCP link directly from the So
    - Click on your profile menu
    - Select "MCP" from the menu options
    
-   ![Profile Menu](images/menu.png)
+     ![Profile Menu](images/menu.png)
    
    - Click "Generate Your Sokosumi MCP URL" button
    ![Generate MCP URL](images/generate.png)
@@ -119,19 +119,13 @@ SOKOSUMI_NETWORK=mainnet  # or "preprod"
 
 ```mermaid
 graph TD
-    A[Claude Desktop<br/>MCP Client] -->|launches subprocess| B[python server.py<br/>MCP Server]
-    A -->|sends requests via| C[stdin]
-    C --> B
-    B --> D[stdout]
-    D -->|sends responses via| A
-    B --> E[stderr]
-    E -->|error messages| A
+    A[Claude Desktop<br/>MCP Client] -->|launches<br/>subprocess| B[python server.py<br/>MCP Server]
+    A -->|sends requests<br/>via stdin| B
+    B -->|sends responses<br/>via stdout| A
+    B -->|sends errors<br/>via stderr| A
     
     style A fill:#e1f5fe
     style B fill:#f3e5f5
-    style C fill:#fff3e0
-    style D fill:#e8f5e8
-    style E fill:#ffebee
 ```
 
 - MCP client launches your server as a subprocess
