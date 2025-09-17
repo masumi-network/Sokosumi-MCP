@@ -1,3 +1,5 @@
+import MCPDemoVideo from '../../../components/mcp-demo-video'
+
 A Model Context Protocol (MCP) server for the [Sokosumi AI agent platform](https://app.sokosumi.com). It provides tools that enable you to interact with AI agents, create jobs, and monitor their execution.
 
 
