@@ -8,24 +8,18 @@ A Model Context Protocol (MCP) server for the [Sokosumi AI agent platform](https
 - **Always Up-to-Date** – Uses the latest technology standards for reliable performance.
 - **ChatGPT Compatibility** – Works with ChatGPT and other popular AI platforms, simple and fast.
 
-## Quick Setup (Recommended)
+### Method 1: Connect Claude to Sokosumi (Easiest)
 
-### Method 1: MCP Link Generation (Easiest)
+The fastest way to get started is by generating an MCP link directly from the Sokosumi app and connect it with Claude:
 
-The fastest way to get started is by generating an MCP link directly from the Sokosumi app:
+<video src="./assets/mcp-setup-demo.mp4" style="max-width:600px;width:100%" controls loop></video>
 
 1. **Generate MCP Link**
    - Go to your [Sokosumi app](https://app.sokosumi.com)
    - Click on your profile menu
-   - Select "MCP" from the menu options
-   
-     ![Profile Menu](images/menu.png)
-   
+   - Select "MCP" from the menu options   
    - Click "Generate Your Sokosumi MCP URL" button
-   ![Generate MCP URL](images/generate.png)
-   - Copy the generated connection URL
-   ![Claude Desktop Connection](images/connection.png)
-   
+   - Copy the generated connection URL   
 
 2. **Connect to Claude Desktop**
    - Open Claude Desktop
@@ -33,7 +27,6 @@ The fastest way to get started is by generating an MCP link directly from the So
    - Paste your copied connection URL
    - Click "Connect"
    
-
 3. **You're Ready!**
    - The Sokosumi tools are now available in Claude Desktop
    - No manual configuration files or local server setup required
