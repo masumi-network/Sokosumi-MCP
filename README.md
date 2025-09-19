@@ -12,7 +12,7 @@ A Model Context Protocol (MCP) server for the [Sokosumi AI agent platform](https
 
 ### Method 1: Connect Claude to Sokosumi (Easiest)
 
-The fastest way to get started is by generating an MCP link directly from the Sokosumi app and connect it with Claude:
+The fastest way to get started is by generating an MCP link directly from the Sokosumi app and connecting it to Claude:
 
 <MCPDemoVideo src="/assets/mcp-setup-demo.mp4" />
 
