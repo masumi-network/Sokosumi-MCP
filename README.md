@@ -33,7 +33,10 @@ The fastest way to get started is by generating an MCP link directly from the So
    - The Sokosumi tools are now available in Claude Desktop
    - No manual configuration files or local server setup required
 
-***Important Note about Jobs:** After submitting a job through Claude, you need to wait a few minutes for the process to complete. Once finished, simply ask Claude again for the result.*
+<Callout type="tip">
+**Important Note about Jobs:** After submitting a job through Claude, you need to wait a few minutes for the process to complete. Once finished, simply ask Claude again for the result.
+</Callout>
+
 
 ---
 
