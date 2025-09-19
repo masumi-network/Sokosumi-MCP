@@ -53,7 +53,7 @@ Once connected, try asking Claude:
 
 ---
 
-## Method 2: Alternative Setup Methods
+## Method 2: Alternative Setup
 
 ### Local Development Setup
 
