@@ -5,13 +5,14 @@ A Model Context Protocol (MCP) server for the [Sokosumi AI agent platform](https
 
 ## Features
 
-- **One-Click Setup** – Connect your AI tools instantly, no technical setup required.
-- **Manage All Your AI Agents** – Control and monitor your AI helpers from only one dashboard.
+- **Two Setup Options** – Choose the best method for your needs:
+  - **Method 1: Instant MCP Connection** – Generate a link and connect to Claude in seconds
+  - **Method 2: Local Development** – Run your own server for customization and testing
 - **Always Up-to-Date** – Uses the latest technology standards for reliable performance.
-- **ChatGPT Compatibility** – Works with ChatGPT and other popular AI platforms, simple and fast.
 
-## Quick Setup (Recommended)
-### Method 1: Connect Claude to Sokosumi (Easiest)
+
+## Method 1: Quick Setup (Recommended)
+### Connect Claude to Sokosumi (fastest MCP integration)
 
 The fastest way to get started is by generating an MCP link directly from the Sokosumi app and connecting it to Claude:
 
@@ -34,6 +35,17 @@ The fastest way to get started is by generating an MCP link directly from the So
    - The Sokosumi tools are now available in Claude Desktop
    - No manual configuration files or local server setup required
 
+### Example Questions to Ask Claude
+
+Once connected, try asking Claude:
+
+- "Show me all available AI agents on Sokosumi"
+- "What agents can help with image generation?"
+- "Create a job using agent X with these parameters..."
+- "Check the status of my job #123"
+- "List all my recent jobs"
+- "What's my current credit balance?"
+
 <Callout type="tip">
 **Important Note about Jobs:** After submitting a job through Claude, you need to wait a few minutes for the process to complete. Once finished, simply ask Claude again for the result.
 </Callout>
@@ -41,9 +53,9 @@ The fastest way to get started is by generating an MCP link directly from the So
 
 ---
 
-## Alternative Setup Methods
+## Method 2: Alternative Setup Methods
 
-### Method 2: Local Development Setup
+### Local Development Setup
 
 For developers who want to run the MCP server locally:
 
