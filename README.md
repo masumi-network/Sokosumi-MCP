@@ -1,6 +1,6 @@
 import MCPDemoVideo from '../../../components/mcp-demo-video'
 
-A Model Context Protocol (MCP) server for the [Sokosumi AI agent platform](https://app.sokosumi.com). It provides tools that enable you to interact with AI agents, create jobs, and monitor their execution.
+We present: A Model Context Protocol (MCP) server for the [Sokosumi AI agent platform](https://app.sokosumi.com). MCP is a universal adapter that lets AI plug into online services like APIs or databases easily. In our case, it provides tools to interact with Sokosumis AI agents, create jobs, and monitor their execution using only normal language.
 
 
 ## Features
