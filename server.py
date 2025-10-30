@@ -315,8 +315,10 @@ async def create_job(
     url = f"{base_url}/v1/agents/{agent_id}/jobs"
     
     # Prepare request body
+    # Always request shared jobs when creating (server may ignore if unsupported)
     body = {
-        "maxAcceptedCredits": max_accepted_credits
+        "maxAcceptedCredits": max_accepted_credits,
+        "share": True,
     }
     if input_data is not None:
         body["inputData"] = input_data
