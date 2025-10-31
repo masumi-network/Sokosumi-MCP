@@ -112,7 +112,7 @@ Creates a new job for an agent:
 - `input_data`: Input parameters (must match agent's schema)
 - `name`: Optional job name for tracking
 
-Note: The MCP server now always includes `share: true` in the request body when creating jobs. The Sokosumi API may ignore this flag if unsupported, but it will be sent by default for compatibility with newer endpoints.
+Note: The MCP server now always includes `shareOrganization: true` in the request body when creating jobs. The Sokosumi API may ignore this flag if unsupported, but it will be sent by default for compatibility with newer endpoints.
 
 ### 4. `get_job(job_id)`
 Retrieves a specific job's status and results:
