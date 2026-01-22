@@ -7,7 +7,7 @@ This module implements:
 
 Flow:
 1. mcp-remote → MCP /oauth/authorize
-2. MCP → Sokosumi /auth/oauth2/authorize (user logs in)
+2. MCP → Sokosumi /api/auth/oauth2/authorize (user logs in)
 3. Sokosumi → MCP /oauth/callback (with auth code)
 4. MCP exchanges code with Sokosumi for access token
 5. MCP → mcp-remote callback (with MCP's auth code)
@@ -36,9 +36,10 @@ logger = logging.getLogger(__name__)
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "https://mcp.sokosumi.com")
 
 # Sokosumi OAuth configuration
+# Base URL for Sokosumi platform (auth endpoints are at /api/auth/)
 SOKOSUMI_OAUTH_BASE_URL = os.environ.get("SOKOSUMI_OAUTH_BASE_URL", "https://app.sokosumi.com")
-SOKOSUMI_AUTH_ENDPOINT = f"{SOKOSUMI_OAUTH_BASE_URL}/auth/oauth2/authorize"
-SOKOSUMI_TOKEN_ENDPOINT = f"{SOKOSUMI_OAUTH_BASE_URL}/auth/oauth2/token"
+SOKOSUMI_AUTH_ENDPOINT = f"{SOKOSUMI_OAUTH_BASE_URL}/api/auth/oauth2/authorize"
+SOKOSUMI_TOKEN_ENDPOINT = f"{SOKOSUMI_OAUTH_BASE_URL}/api/auth/oauth2/token"
 
 # OAuth client credentials (set via environment)
 OAUTH_CLIENT_ID = os.environ.get("OAUTH_CLIENT_ID", "")

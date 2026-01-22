@@ -323,7 +323,7 @@ python test_client.py  # In another terminal
 The MCP server implements a hybrid OAuth architecture:
 
 **As OAuth Client (to Sokosumi)**:
-- Redirects users to Sokosumi's `/auth/oauth2/authorize`
+- Redirects users to Sokosumi's `/api/auth/oauth2/authorize`
 - Exchanges Sokosumi auth codes for Sokosumi access tokens
 - Uses Sokosumi tokens for API calls
 
