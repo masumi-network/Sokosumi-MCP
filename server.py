@@ -2,7 +2,7 @@
 """
 Minimal MCP server with FastMCP for remote deployment.
 Using Streamable HTTP transport (the modern standard).
-Includes self-contained OAuth 2.1 authorization server per MCP spec.
+OAuth 2.1 authentication delegates to Sokosumi's OAuth provider.
 """
 
 import os
@@ -25,10 +25,11 @@ from oauth import (
     get_authorization_server_metadata,
     get_www_authenticate_header,
     get_jwks,
-    get_login_page_html,
-    create_authorization_session,
-    get_authorization_session,
-    create_authorization_code,
+    create_mcp_session,
+    get_mcp_session,
+    build_sokosumi_auth_url,
+    exchange_sokosumi_code,
+    create_mcp_auth_code,
     exchange_code_for_tokens,
     refresh_access_token,
 )
@@ -98,11 +99,14 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                     user_payload = await validate_access_token(bearer_token)
                     user_token = current_user.set(user_payload)
 
-                    # Also set the API key from the JWT payload for downstream API calls
-                    api_key_from_jwt = user_payload.get('api_key')
-                    if api_key_from_jwt:
-                        api_token = current_api_key.set(api_key_from_jwt)
-                        api_keys["current"] = api_key_from_jwt
+                    # Extract Sokosumi token from JWT payload for downstream API calls
+                    # This is the Sokosumi OAuth access token obtained during authentication
+                    sokosumi_token = user_payload.get('sokosumi_token')
+                    if sokosumi_token:
+                        # Store the Sokosumi token as the "API key" for downstream calls
+                        # The Sokosumi API accepts Bearer tokens as well
+                        api_token = current_api_key.set(sokosumi_token)
+                        api_keys["current"] = sokosumi_token
 
                     logger.info(f"Authenticated via JWT for user: {user_payload.get('sub', 'unknown')}")
                     response = await call_next(request)
@@ -200,15 +204,37 @@ def get_base_url(network: Optional[str] = None) -> str:
     else:
         return 'https://app.sokosumi.com/api'
 
-# Helper function to get API key
+# Helper function to get API key/token
 def get_current_api_key() -> Optional[str]:
     """
-    Get the current API key from context or storage.
+    Get the current API key or OAuth token from context or storage.
 
     Returns:
-        The API key or None if not found
+        The API key/token or None if not found
     """
     return current_api_key.get() or api_keys.get('current')
+
+
+def get_auth_headers() -> Dict[str, str]:
+    """
+    Get authentication headers for Sokosumi API calls.
+
+    Returns headers with either:
+    - x-api-key: for direct API key authentication
+    - Authorization: Bearer for OAuth tokens
+
+    The Sokosumi API accepts both formats.
+    """
+    token = get_current_api_key()
+    if not token:
+        return {}
+
+    # If it looks like a JWT or OAuth token (contains dots), use Bearer
+    # Otherwise, use x-api-key header
+    if '.' in token or token.startswith('eyJ'):
+        return {"Authorization": f"Bearer {token}"}
+    else:
+        return {"x-api-key": token}
 
 
 def get_current_user() -> Optional[Dict[str, Any]]:
@@ -345,7 +371,7 @@ async def list_agents() -> Dict[str, Any]:
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 url,
-                headers={"x-api-key": api_key},
+                headers=get_auth_headers(),
                 timeout=30.0
             )
 
@@ -388,7 +414,7 @@ async def get_agent_input_schema(agent_id: str) -> Dict[str, Any]:
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 url,
-                headers={"x-api-key": api_key},
+                headers=get_auth_headers(),
                 timeout=30.0
             )
 
@@ -451,7 +477,7 @@ async def create_job(
             response = await client.post(
                 url,
                 json=body,
-                headers={"x-api-key": api_key},
+                headers=get_auth_headers(),
                 timeout=30.0
             )
 
@@ -499,7 +525,7 @@ async def get_job(job_id: str) -> Dict[str, Any]:
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 url,
-                headers={"x-api-key": api_key},
+                headers=get_auth_headers(),
                 timeout=30.0
             )
 
@@ -543,7 +569,7 @@ async def list_agent_jobs(agent_id: str) -> Dict[str, Any]:
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 url,
-                headers={"x-api-key": api_key},
+                headers=get_auth_headers(),
                 timeout=30.0
             )
 
@@ -589,7 +615,7 @@ async def get_user_profile() -> Dict[str, Any]:
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 url,
-                headers={"x-api-key": api_key},
+                headers=get_auth_headers(),
                 timeout=30.0
             )
 
@@ -647,7 +673,7 @@ async def search(query: str) -> Dict[str, Any]:
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 url,
-                headers={"x-api-key": api_key},
+                headers=get_auth_headers(),
                 timeout=30.0
             )
 
@@ -744,7 +770,7 @@ async def fetch(id: str) -> Dict[str, Any]:
             # Get agent list to find specific agent
             agents_response = await client.get(
                 f"{base_url}/v1/agents",
-                headers={"x-api-key": api_key},
+                headers=get_auth_headers(),
                 timeout=30.0
             )
 
@@ -778,7 +804,7 @@ async def fetch(id: str) -> Dict[str, Any]:
             # Get input schema
             schema_response = await client.get(
                 f"{base_url}/v1/agents/{id}/input-schema",
-                headers={"x-api-key": api_key},
+                headers=get_auth_headers(),
                 timeout=30.0
             )
 
@@ -878,10 +904,10 @@ async def oauth_authorize(request: Request) -> Response:
     """
     OAuth 2.1 Authorization Endpoint.
 
-    Handles the authorization request by showing a login page.
+    Redirects to Sokosumi's OAuth provider for authentication.
     Supports PKCE (required by MCP spec).
     """
-    # Extract OAuth parameters
+    # Extract OAuth parameters from mcp-remote
     client_id = request.query_params.get("client_id", "")
     redirect_uri = request.query_params.get("redirect_uri", "")
     response_type = request.query_params.get("response_type", "")
@@ -923,8 +949,8 @@ async def oauth_authorize(request: Request) -> Response:
             content={"error": "invalid_request", "error_description": "code_challenge_method must be S256"},
         )
 
-    # Create authorization session
-    session_id = create_authorization_session(
+    # Create MCP session to track mcp-remote's request
+    mcp_session_id = create_mcp_session(
         client_id=client_id,
         redirect_uri=redirect_uri,
         code_challenge=code_challenge,
@@ -934,82 +960,127 @@ async def oauth_authorize(request: Request) -> Response:
         resource=resource,
     )
 
-    logger.info(f"OAuth authorize: showing login page for session {session_id[:8]}...")
+    # Build Sokosumi OAuth URL and redirect user there
+    sokosumi_auth_url = build_sokosumi_auth_url(mcp_session_id)
+    logger.info(f"OAuth authorize: redirecting to Sokosumi for session {mcp_session_id[:8]}...")
 
-    # Show login page
-    return HTMLResponse(content=get_login_page_html(session_id))
+    return RedirectResponse(url=sokosumi_auth_url, status_code=302)
 
 
-async def oauth_login(request: Request) -> Response:
+async def oauth_callback(request: Request) -> Response:
     """
-    Handle login form submission.
+    OAuth Callback Endpoint.
 
-    Validates the API key and redirects back to the client with an auth code.
+    Handles the callback from Sokosumi OAuth after user authentication.
+    Exchanges Sokosumi's code for tokens, then redirects back to mcp-remote.
     """
-    # Parse form data
-    form = await request.form()
-    session_id = form.get("session_id", "")
-    api_key = form.get("api_key", "")
+    # Extract callback parameters from Sokosumi
+    code = request.query_params.get("code", "")
+    state = request.query_params.get("state", "")
+    error = request.query_params.get("error", "")
+    error_description = request.query_params.get("error_description", "")
 
-    if not session_id or not api_key:
+    # Handle errors from Sokosumi
+    if error:
+        logger.error(f"Sokosumi OAuth error: {error} - {error_description}")
         return HTMLResponse(
-            content=get_login_page_html(session_id, error="Please enter your API key"),
+            content=f"""
+            <!DOCTYPE html>
+            <html>
+            <head><title>Authentication Error</title></head>
+            <body style="font-family: sans-serif; padding: 40px; text-align: center;">
+                <h1>Authentication Failed</h1>
+                <p>Error: {error}</p>
+                <p>{error_description}</p>
+                <p><a href="https://app.sokosumi.com">Return to Sokosumi</a></p>
+            </body>
+            </html>
+            """,
             status_code=400,
         )
 
-    # Get session
-    session = get_authorization_session(session_id)
-    if not session:
-        return HTMLResponse(
-            content=get_login_page_html(session_id, error="Session expired. Please try again."),
+    if not code or not state:
+        return JSONResponse(
             status_code=400,
+            content={"error": "invalid_request", "error_description": "Missing code or state"},
         )
 
-    # Validate API key by calling Sokosumi API
     try:
+        # Exchange Sokosumi code for tokens
+        sokosumi_tokens = await exchange_sokosumi_code(code, state)
+        sokosumi_access_token = sokosumi_tokens["access_token"]
+        mcp_session_id = sokosumi_tokens["mcp_session_id"]
+
+        # Get user info from Sokosumi using the access token
         async with httpx.AsyncClient() as client:
-            response = await client.get(
+            # Try to get user info from Sokosumi
+            user_response = await client.get(
                 "https://app.sokosumi.com/api/v1/users/me",
-                headers={"x-api-key": api_key},
+                headers={"Authorization": f"Bearer {sokosumi_access_token}"},
                 timeout=10.0,
             )
 
-            if response.status_code != 200:
-                logger.warning(f"Invalid API key: {response.status_code}")
-                return HTMLResponse(
-                    content=get_login_page_html(session_id, error="Invalid API key. Please check and try again."),
-                    status_code=400,
-                )
+            if user_response.status_code == 200:
+                user_data = user_response.json().get("data", {})
+                user_id = user_data.get("id", "unknown")
+            else:
+                # Fallback: extract from id_token if available
+                user_id = "authenticated_user"
+                logger.warning(f"Could not get user info from Sokosumi: {user_response.status_code}")
 
-            user_data = response.json().get("data", {})
-            user_id = user_data.get("id", "unknown")
+        # Get the MCP session to retrieve mcp-remote's redirect_uri and state
+        mcp_session = get_mcp_session(mcp_session_id)
+        if not mcp_session:
+            # Session might have been consumed, try to get from stored data
+            raise ValueError("MCP session expired or not found")
 
-    except Exception as e:
-        logger.error(f"Error validating API key: {e}")
-        return HTMLResponse(
-            content=get_login_page_html(session_id, error="Could not validate API key. Please try again."),
-            status_code=500,
-        )
+        # Create MCP auth code for mcp-remote
+        mcp_code = create_mcp_auth_code(mcp_session_id, sokosumi_access_token, user_id)
 
-    # Create authorization code
-    try:
-        code = create_authorization_code(session_id, user_id, api_key)
+        # Redirect back to mcp-remote with MCP's auth code
+        redirect_params = {
+            "code": mcp_code,
+            "state": mcp_session["state"],
+        }
+
+        redirect_url = f"{mcp_session['redirect_uri']}?{urlencode(redirect_params)}"
+        logger.info(f"OAuth callback successful, redirecting to mcp-remote: {redirect_url[:50]}...")
+
+        return RedirectResponse(url=redirect_url, status_code=302)
+
     except ValueError as e:
+        logger.error(f"OAuth callback error: {e}")
         return HTMLResponse(
-            content=get_login_page_html(session_id, error=str(e)),
+            content=f"""
+            <!DOCTYPE html>
+            <html>
+            <head><title>Authentication Error</title></head>
+            <body style="font-family: sans-serif; padding: 40px; text-align: center;">
+                <h1>Authentication Failed</h1>
+                <p>{str(e)}</p>
+                <p>Please try connecting again.</p>
+                <p><a href="https://app.sokosumi.com">Return to Sokosumi</a></p>
+            </body>
+            </html>
+            """,
             status_code=400,
         )
-
-    # Redirect back to client with authorization code
-    redirect_params = {
-        "code": code,
-        "state": session["state"],
-    }
-
-    redirect_url = f"{session['redirect_uri']}?{urlencode(redirect_params)}"
-    logger.info(f"OAuth login successful, redirecting to: {redirect_url[:50]}...")
-
-    return RedirectResponse(url=redirect_url, status_code=302)
+    except Exception as e:
+        logger.error(f"OAuth callback unexpected error: {e}")
+        return HTMLResponse(
+            content=f"""
+            <!DOCTYPE html>
+            <html>
+            <head><title>Authentication Error</title></head>
+            <body style="font-family: sans-serif; padding: 40px; text-align: center;">
+                <h1>Authentication Failed</h1>
+                <p>An unexpected error occurred. Please try again.</p>
+                <p><a href="https://app.sokosumi.com">Return to Sokosumi</a></p>
+            </body>
+            </html>
+            """,
+            status_code=500,
+        )
 
 
 async def oauth_token(request: Request) -> Response:
@@ -1113,9 +1184,9 @@ if __name__ == "__main__":
                     methods=["GET"],
                 ),
                 Route(
-                    "/oauth/login",
-                    oauth_login,
-                    methods=["POST"],
+                    "/oauth/callback",
+                    oauth_callback,
+                    methods=["GET"],
                 ),
                 Route(
                     "/oauth/token",
@@ -1125,7 +1196,7 @@ if __name__ == "__main__":
             ]
             for route in oauth_routes:
                 app.routes.insert(0, route)
-            logger.info("Added OAuth 2.1 endpoints (self-contained authorization server)")
+            logger.info("Added OAuth 2.1 endpoints (delegating to Sokosumi OAuth)")
 
             # Add authentication middleware (API key or OAuth Bearer token)
             app.add_middleware(AuthenticationMiddleware)

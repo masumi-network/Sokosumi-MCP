@@ -16,11 +16,11 @@ This is a **Remote MCP Server** implementation, which according to industry guid
 - **Dual transport support**:
   - STDIO transport for local MCP clients (Claude Desktop, etc.)
   - Streamable HTTP transport for remote access (Railway deployment)
-- **Dual authentication** (MCP Authorization spec compliant):
-  - **API Key**: Via `?api_key=xxx` query parameter or `x-api-key` header
-  - **OAuth 2.1 Bearer Token**: Via `Authorization: Bearer <jwt>` header
-  - Self-contained OAuth authorization server (no external dependencies)
+- **OAuth 2.1 Authentication** (MCP Authorization spec compliant):
+  - Delegates authentication to Sokosumi's OAuth provider
+  - Users login with their Sokosumi account (no API key needed)
   - Automatic discovery via `/.well-known/oauth-protected-resource`
+  - Also supports direct API key authentication for backwards compatibility
 - **Parameter extraction from URL**: ASGI middleware automatically extracts:
   - API keys from `?api_key=xxx` query parameter
   - Network from `?network=preprod` or `?network=mainnet` (defaults to mainnet)
@@ -40,7 +40,7 @@ This is a **Remote MCP Server** implementation, which according to industry guid
 
 ### 1. Railway/Cloud Run (HTTP) - Production
 When deployed with PORT env var set, uses Streamable HTTP transport:
-- **Endpoint**: `https://sokosumi-mcp-production.up.railway.app/mcp` (Streamable HTTP endpoint)
+- **Endpoint**: `https://mcp.sokosumi.com/mcp` (Streamable HTTP endpoint)
 - **Transport**: Streamable HTTP (the modern standard)
 - **Protocol**: MCP 2025-06-18 specification
 - **Access**: Remote MCP clients via HTTP
@@ -52,17 +52,17 @@ When run locally without PORT env var:
 - **Use Case**: Development and testing
 
 ## Files
-- `server.py` - FastMCP server with Sokosumi API integration and self-contained OAuth server
-- `oauth.py` - OAuth 2.1 self-contained authorization server (PKCE, JWT signing, token validation)
+- `server.py` - FastMCP server with Sokosumi API integration and OAuth routes
+- `oauth.py` - OAuth 2.1 client (delegates to Sokosumi) + server (issues JWTs to MCP clients)
 - `requirements.txt` - Python dependencies (mcp, uvicorn, starlette, httpx, PyJWT, cryptography)
 - `railway.json` - Railway deployment configuration
 - `Procfile` - Railway start command
 - `test_client.py` - Test client for stdio transport
-- `CONTEXT.md` - This documentation file
+- `llms/CONTEXT.md` - This documentation file
 
 ## How to Connect
 
-### Using mcp-remote Bridge with API Key
+### Using mcp-remote Bridge (Recommended - OAuth Flow)
 Until clients support remote servers directly:
 ```json
 {
@@ -72,144 +72,34 @@ Until clients support remote servers directly:
       "args": [
         "-y",
         "mcp-remote",
-        "https://sokosumi-mcp-production.up.railway.app/mcp?api_key=YOUR_API_KEY&network=mainnet"
+        "https://mcp.sokosumi.com/mcp"
       ]
     }
   }
 }
 ```
 
-### Direct Remote Connection with API Key (Future)
-When clients support remote MCP servers:
-```
-https://sokosumi-mcp-production.up.railway.app/mcp?api_key=YOUR_API_KEY&network=mainnet
-```
+When you connect, mcp-remote will:
+1. Discover OAuth endpoints via `/.well-known/oauth-authorization-server`
+2. Open your browser to Sokosumi's login page
+3. You login with your Sokosumi account credentials
+4. Get redirected back and authenticated automatically
 
-The API key and network will be automatically extracted from the URL and made available to all tools.
-
-### OAuth 2.1 Authentication (MCP Spec Compliant)
-
-This MCP server implements a **self-contained OAuth 2.1 authorization server** following the [MCP Authorization specification](https://spec.modelcontextprotocol.io/specification/draft/basic/authorization/). No external OAuth provider is required.
-
-#### How It Works
-
-1. User initiates OAuth flow with PKCE
-2. MCP server shows login page
-3. User authenticates with their **Sokosumi API key**
-4. MCP server validates API key against Sokosumi API
-5. MCP server issues JWT access token (signed with RSA)
-6. User uses JWT token for MCP requests
-
-#### Discovery Endpoints
-
-**Protected Resource Metadata (RFC 9728)**:
-```
-GET https://sokosumi-mcp-production.up.railway.app/.well-known/oauth-protected-resource
-```
-Returns:
+### Using mcp-remote with API Key (Legacy)
+For backwards compatibility, you can still use API keys:
 ```json
 {
-  "resource": "https://sokosumi-mcp-production.up.railway.app",
-  "authorization_servers": ["https://sokosumi-mcp-production.up.railway.app"],
-  "bearer_methods_supported": ["header"],
-  "scopes_supported": ["mcp:read", "mcp:write"]
+  "mcpServers": {
+    "sokosumi": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.sokosumi.com/mcp?api_key=YOUR_API_KEY&network=mainnet"
+      ]
+    }
+  }
 }
-```
-
-**Authorization Server Metadata (RFC 8414)**:
-```
-GET https://sokosumi-mcp-production.up.railway.app/.well-known/oauth-authorization-server
-```
-Returns:
-```json
-{
-  "issuer": "https://sokosumi-mcp-production.up.railway.app",
-  "authorization_endpoint": "https://sokosumi-mcp-production.up.railway.app/oauth/authorize",
-  "token_endpoint": "https://sokosumi-mcp-production.up.railway.app/oauth/token",
-  "jwks_uri": "https://sokosumi-mcp-production.up.railway.app/oauth/jwks",
-  "response_types_supported": ["code"],
-  "grant_types_supported": ["authorization_code", "refresh_token"],
-  "code_challenge_methods_supported": ["S256"]
-}
-```
-
-#### OAuth Endpoints
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/oauth/authorize` | GET | Authorization endpoint - shows login page |
-| `/oauth/login` | POST | Handles login form submission |
-| `/oauth/token` | POST | Token endpoint - exchanges code for tokens |
-| `/oauth/jwks` | GET | JWKS endpoint for token verification |
-| `/.well-known/oauth-protected-resource` | GET | Protected Resource Metadata |
-| `/.well-known/oauth-authorization-server` | GET | Authorization Server Metadata |
-
-#### OAuth Flow (Detailed)
-
-1. **Client initiates authorization**:
-   ```
-   GET /oauth/authorize?
-     response_type=code&
-     client_id=your-client-id&
-     redirect_uri=http://localhost:3000/callback&
-     code_challenge=<S256_CHALLENGE>&
-     code_challenge_method=S256&
-     state=<RANDOM_STATE>&
-     scope=mcp:read%20mcp:write
-   ```
-
-2. **Server shows login page** - User enters their Sokosumi API key
-
-3. **Server validates API key** against Sokosumi's `/api/v1/users/me` endpoint
-
-4. **Server redirects with auth code**:
-   ```
-   302 Redirect to: http://localhost:3000/callback?code=<AUTH_CODE>&state=<STATE>
-   ```
-
-5. **Client exchanges code for tokens**:
-   ```
-   POST /oauth/token
-   Content-Type: application/x-www-form-urlencoded
-
-   grant_type=authorization_code&
-   code=<AUTH_CODE>&
-   code_verifier=<PKCE_VERIFIER>&
-   client_id=your-client-id&
-   redirect_uri=http://localhost:3000/callback
-   ```
-
-6. **Server returns JWT tokens**:
-   ```json
-   {
-     "access_token": "eyJhbGciOiJSUzI1NiIs...",
-     "token_type": "Bearer",
-     "expires_in": 3600,
-     "refresh_token": "abc123...",
-     "scope": "mcp:read mcp:write"
-   }
-   ```
-
-#### Authentication Priority
-
-1. **API key** (query param `?api_key=` or `x-api-key` header) - checked first
-2. **Bearer token** (`Authorization: Bearer <jwt>`) - checked if no API key
-3. **Neither** - returns 401 with `WWW-Authenticate` header for discovery
-
-#### Using OAuth Tokens
-
-After obtaining a token, include it in your MCP requests:
-
-```bash
-# With curl
-curl -X POST "https://sokosumi-mcp-production.up.railway.app/mcp" \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
-
-# With mcp-remote (OAuth tokens via header)
-npx mcp-remote "https://sokosumi-mcp-production.up.railway.app/mcp" \
-  --header "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
 ### Local Development
@@ -223,6 +113,103 @@ npx mcp-remote "https://sokosumi-mcp-production.up.railway.app/mcp" \
   }
 }
 ```
+
+## OAuth 2.1 Authentication Flow
+
+This MCP server implements OAuth 2.1 that **delegates to Sokosumi's OAuth provider**. Users login with their Sokosumi account, not API keys.
+
+### How It Works
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  mcp-remote │     │  MCP Server │     │   Sokosumi  │
+│   (client)  │     │             │     │    OAuth    │
+└──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+       │                   │                   │
+       │ 1. /oauth/authorize                   │
+       │──────────────────>│                   │
+       │                   │                   │
+       │ 2. Redirect to Sokosumi               │
+       │<──────────────────│                   │
+       │                   │                   │
+       │ 3. User logs in   │                   │
+       │───────────────────────────────────────>
+       │                   │                   │
+       │ 4. Callback with code                 │
+       │<──────────────────────────────────────│
+       │                   │                   │
+       │ 5. /oauth/callback (code)             │
+       │──────────────────>│                   │
+       │                   │                   │
+       │                   │ 6. Exchange code  │
+       │                   │──────────────────>│
+       │                   │                   │
+       │                   │ 7. Sokosumi token │
+       │                   │<──────────────────│
+       │                   │                   │
+       │ 8. Redirect with MCP code             │
+       │<──────────────────│                   │
+       │                   │                   │
+       │ 9. /oauth/token   │                   │
+       │──────────────────>│                   │
+       │                   │                   │
+       │ 10. MCP JWT token │                   │
+       │<──────────────────│                   │
+       │                   │                   │
+       │ 11. /mcp (with JWT)                   │
+       │──────────────────>│                   │
+       │                   │                   │
+```
+
+### Discovery Endpoints
+
+**Protected Resource Metadata (RFC 9728)**:
+```
+GET https://mcp.sokosumi.com/.well-known/oauth-protected-resource
+```
+Returns:
+```json
+{
+  "resource": "https://mcp.sokosumi.com",
+  "authorization_servers": ["https://mcp.sokosumi.com"],
+  "bearer_methods_supported": ["header"],
+  "scopes_supported": ["mcp:read", "mcp:write"]
+}
+```
+
+**Authorization Server Metadata (RFC 8414)**:
+```
+GET https://mcp.sokosumi.com/.well-known/oauth-authorization-server
+```
+Returns:
+```json
+{
+  "issuer": "https://mcp.sokosumi.com",
+  "authorization_endpoint": "https://mcp.sokosumi.com/oauth/authorize",
+  "token_endpoint": "https://mcp.sokosumi.com/oauth/token",
+  "jwks_uri": "https://mcp.sokosumi.com/oauth/jwks",
+  "response_types_supported": ["code"],
+  "grant_types_supported": ["authorization_code", "refresh_token"],
+  "code_challenge_methods_supported": ["S256"]
+}
+```
+
+### OAuth Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/oauth/authorize` | GET | Redirects to Sokosumi OAuth for login |
+| `/oauth/callback` | GET | Receives callback from Sokosumi after login |
+| `/oauth/token` | POST | Exchanges MCP auth code for JWT token |
+| `/oauth/jwks` | GET | JWKS endpoint for token verification |
+| `/.well-known/oauth-protected-resource` | GET | Protected Resource Metadata |
+| `/.well-known/oauth-authorization-server` | GET | Authorization Server Metadata |
+
+### Authentication Priority
+
+1. **API key** (query param `?api_key=` or `x-api-key` header) - checked first
+2. **Bearer token** (`Authorization: Bearer <jwt>`) - checked if no API key
+3. **Neither** - returns 401 with `WWW-Authenticate` header for discovery
 
 ## Available Tools
 
@@ -243,7 +230,7 @@ Creates a new job for an agent:
 - `input_data`: Input parameters (must match agent's schema)
 - `name`: Optional job name for tracking
 
-Note: The MCP server now always includes `shareOrganization: true` in the request body when creating jobs. The Sokosumi API may ignore this flag if unsupported, but it will be sent by default for compatibility with newer endpoints.
+Note: The MCP server always includes `shareOrganization: true` in the request body when creating jobs.
 
 ### 4. `get_job(job_id)`
 Retrieves a specific job's status and results:
@@ -283,8 +270,8 @@ A comprehensive guide for hiring agents on Sokosumi. The recommended workflow is
 
 ### Test with curl
 ```bash
-# Initialize connection with API key and network
-curl -X POST "https://sokosumi-mcp-production.up.railway.app/mcp?api_key=YOUR_KEY&network=mainnet" \
+# Initialize connection (will return 401 prompting OAuth)
+curl -X POST "https://mcp.sokosumi.com/mcp" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{
@@ -300,6 +287,12 @@ curl -X POST "https://sokosumi-mcp-production.up.railway.app/mcp?api_key=YOUR_KE
     },
     "id": 1
   }'
+
+# With API key (legacy)
+curl -X POST "https://mcp.sokosumi.com/mcp?api_key=YOUR_KEY&network=mainnet" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc": "2.0", "method": "tools/list", "id": 1}'
 ```
 
 ### Local Testing
@@ -316,8 +309,7 @@ python test_client.py  # In another terminal
 | Transport | ✅ Streamable HTTP | ✅ Complete |
 | Tools | ✅ Full Sokosumi API integration | ✅ Complete |
 | Authentication | ✅ API key + OAuth 2.1 Bearer | ✅ Complete |
-| OAuth Server | ✅ Self-contained (PKCE, JWT) | ✅ Complete |
-| OAuth Discovery | ✅ RFC 9728 + RFC 8414 | ✅ Complete |
+| OAuth Flow | ✅ Delegates to Sokosumi OAuth | ✅ Complete |
 | JWT Signing | ✅ RSA 2048 (auto-generated keys) | ✅ Complete |
 | Session Management | ⚠️ In-memory | Redis or database |
 | Parameter Extraction | ✅ API key & network from URL | ✅ Complete |
@@ -327,42 +319,39 @@ python test_client.py  # In another terminal
 
 ## Implementation Details
 
-### OAuth 2.1 Self-Contained Authorization Server
-The MCP server implements a complete OAuth 2.1 authorization server:
-- **RSA Key Generation**: 2048-bit RSA keys generated on startup (can be persisted via env vars)
-- **PKCE Support**: S256 code challenge method (required by MCP spec)
-- **JWT Tokens**: RS256 signed access tokens with configurable expiry
-- **Refresh Tokens**: Token rotation for security
-- **JWKS Endpoint**: Public keys for token verification
+### OAuth 2.1 Architecture
+The MCP server implements a hybrid OAuth architecture:
+
+**As OAuth Client (to Sokosumi)**:
+- Redirects users to Sokosumi's `/auth/oauth2/authorize`
+- Exchanges Sokosumi auth codes for Sokosumi access tokens
+- Uses Sokosumi tokens for API calls
+
+**As OAuth Server (to MCP clients)**:
+- Issues its own JWTs to mcp-remote clients
+- Signs tokens with RSA 2048-bit keys
+- Provides JWKS endpoint for verification
 
 ### Authentication Middleware
 - **API Key**: Extracts from `?api_key=xxx` query param or `x-api-key` header
 - **OAuth Bearer**: Validates JWT from `Authorization: Bearer <jwt>` header
-- JWT validated locally using server's own public key
-- Returns 401 with `WWW-Authenticate` header pointing to discovery endpoint if unauthenticated
-- Stores auth info in context variables for request-scoped access
-
-### Key Files
-- **`oauth.py`**: Self-contained OAuth module with:
-  - RSA key generation and management
-  - JWKS generation
-  - OAuth session management
-  - Authorization code generation
-  - Token exchange with PKCE validation
-  - JWT token creation and validation
-  - Login page HTML generation
+- Automatically uses appropriate auth for Sokosumi API (Bearer or x-api-key)
+- Returns 401 with `WWW-Authenticate` header if unauthenticated
 
 ### Environment Variables
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PORT` | HTTP port (triggers remote mode) | None (uses stdio) |
-| `MCP_SERVER_URL` | Public URL of the server | `https://sokosumi-mcp-production.up.railway.app` |
+| `MCP_SERVER_URL` | Public URL of the server | `https://mcp.sokosumi.com` |
+| `SOKOSUMI_OAUTH_BASE_URL` | Sokosumi OAuth base URL | `https://app.sokosumi.com` |
+| `OAUTH_CLIENT_ID` | OAuth client ID for Sokosumi | Required for OAuth |
+| `OAUTH_CLIENT_SECRET` | OAuth client secret for Sokosumi | Required for OAuth |
 | `OAUTH_PRIVATE_KEY` | PEM-encoded RSA private key | Auto-generated |
 | `OAUTH_KEY_ID` | Key ID for JWKS | Auto-generated |
 
 ### Sokosumi API Integration
 - Base URLs: `https://preprod.sokosumi.com/api` (preprod) or `https://app.sokosumi.com/api` (mainnet)
-- Authentication via `x-api-key` header
+- Authentication: Bearer token (OAuth) or x-api-key header (API key)
 - All API calls use async httpx client with 30s timeout
 - Comprehensive error handling and logging
 
@@ -384,7 +373,7 @@ Based on best practices and official examples:
    - Add job status polling/monitoring
    - Implement job cancellation
    - Add batch job submission
-   - Implement rate limiting per API key
+   - Implement rate limiting per user
 
 3. **Monitoring**
    - Add health checks
