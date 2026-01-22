@@ -13,6 +13,7 @@ from urllib.parse import urlencode, parse_qs
 import httpx
 import jwt
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, RedirectResponse, HTMLResponse
@@ -42,8 +43,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Create the FastMCP server instance
-mcp = FastMCP("sokosumi-mcp")
+# Create the FastMCP server instance with transport security configured for Railway
+# This allows the custom domain mcp.sokosumi.com to be used
+mcp = FastMCP(
+    "sokosumi-mcp",
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=["localhost:*", "127.0.0.1:*", "mcp.sokosumi.com", "mcp.sokosumi.com:*"],
+        allowed_origins=["https://mcp.sokosumi.com", "https://mcp.sokosumi.com:*", "http://localhost:*"],
+    )
+)
 
 # Simple in-memory storage for demonstration
 api_keys = {}
