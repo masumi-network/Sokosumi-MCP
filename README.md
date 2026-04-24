@@ -206,14 +206,64 @@ Replace `/absolute/path/to/Sokosumi-MCP/server.py` with your actual path and res
 
 ## Available Tools
 
+### Agents
 | Tool | Description |
 |------|-------------|
 | `list_agents()` | List all available AI agents with pricing |
-| `get_agent_input_schema(agent_id)` | Get input parameters for an agent |
-| `create_job(agent_id, max_accepted_credits, input_data, name)` | Submit a job to an agent |
-| `get_job(job_id)` | Get job status and results |
+| `get_agent_input_schema(agent_id)` | Get input parameters schema for an agent |
 | `list_agent_jobs(agent_id)` | List jobs for a specific agent |
+
+### Jobs
+| Tool | Description |
+|------|-------------|
+| `create_job(agent_id, input_schema, input_data, max_credits?, name?)` | Submit a job to an agent. `input_schema` comes from `get_agent_input_schema` |
+| `list_jobs()` | List all your jobs across all agents |
+| `get_job(job_id)` | Get job status, output, and metadata |
+| `get_job_events(job_id)` | Get lifecycle events / logs for a job |
+| `get_job_files(job_id)` | Get file outputs produced by a job |
+| `get_job_links(job_id)` | Get link outputs produced by a job |
+| `get_job_input_request(job_id)` | Check if a job is waiting for additional input |
+| `submit_job_input(job_id, event_id, input_data)` | Provide requested input to a waiting job |
+
+### Tasks (coworker orchestration)
+| Tool | Description |
+|------|-------------|
+| `list_tasks()` | List all your tasks |
+| `get_task(task_id)` | Get a task |
+| `create_task(name?, description?, coworker_id?, status?)` | Create a task |
+| `update_task(task_id, name?, description?, status?)` | Update task metadata |
+| `delete_task(task_id)` | Delete a task |
+| `list_task_jobs(task_id)` | List jobs inside a task |
+| `add_job_to_task(task_id, agent_id, input_schema, input_data, max_credits?, name?)` | Add a new agent job to a task |
+| `list_task_events(task_id)` | List status changes and comments on a task |
+| `create_task_event(task_id, status?, comment?)` | Post a status update or comment to a task |
+
+### Coworkers
+| Tool | Description |
+|------|-------------|
+| `list_coworkers(scope?, capability?)` | List coworkers (filter by scope and capability) |
+| `get_coworker(coworker_id)` | Get a coworker by ID |
+| `get_current_coworker()` | Get the coworker tied to the current auth token |
+| `create_coworker(name, caption?, company?, ...)` | Register a new coworker |
+| `update_coworker(coworker_id, ...)` | Update a coworker |
+| `create_coworker_api_key(coworker_id, name?, expires_at?)` | Issue an API key for a coworker |
+
+### Categories
+| Tool | Description |
+|------|-------------|
+| `list_categories()` | List all agent categories |
+| `get_category(category_id_or_slug)` | Get a category by ID or slug |
+
+### User
+| Tool | Description |
+|------|-------------|
 | `get_user_profile()` | Get your account information |
+
+### ChatGPT compatibility
+| Tool | Description |
+|------|-------------|
+| `search(query)` | Keyword-search Sokosumi agents (for ChatGPT Connectors) |
+| `fetch(id)` | Fetch agent details in ChatGPT document format |
 
 
 ## Troubleshooting
