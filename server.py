@@ -228,22 +228,98 @@ def get_auth_headers() -> Dict[str, str]:
     """
     Get authentication headers for Sokosumi API calls.
 
-    Returns headers with either:
-    - x-api-key: for direct API key authentication
-    - Authorization: Bearer for OAuth tokens
-
-    The Sokosumi API accepts both formats.
+    The current Sokosumi API (per OpenAPI spec) requires Bearer token
+    authentication for both user credentials and coworker API keys.
     """
     token = get_current_api_key()
     if not token:
         return {}
+    return {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
 
-    # If it looks like a JWT or OAuth token (contains dots), use Bearer
-    # Otherwise, use x-api-key header
-    if '.' in token or token.startswith('eyJ'):
-        return {"Authorization": f"Bearer {token}"}
-    else:
-        return {"x-api-key": token}
+
+# Shared HTTP clients keyed by network. Reusing a client across calls avoids
+# a fresh TLS handshake per request and enables HTTP/2 connection reuse.
+_http_clients: Dict[str, httpx.AsyncClient] = {}
+
+
+def _get_http_client(network: str) -> httpx.AsyncClient:
+    """Return (and lazily create) a shared AsyncClient for the given network."""
+    client = _http_clients.get(network)
+    if client is None or client.is_closed:
+        base_url = (
+            "https://preprod.sokosumi.com/api"
+            if network == "preprod"
+            else "https://app.sokosumi.com/api"
+        )
+        client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            limits=httpx.Limits(max_connections=50, max_keepalive_connections=10),
+            http2=False,  # keep False unless h2 is added to requirements
+        )
+        _http_clients[network] = client
+    return client
+
+
+async def _api_request(
+    method: str,
+    path: str,
+    *,
+    body: Optional[Dict[str, Any]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    expect_status: Optional[list] = None,
+) -> Dict[str, Any]:
+    """
+    Unified Sokosumi API request helper.
+
+    Handles auth, error wrapping, and JSON parsing. Returns a dict with either
+    the parsed response body, or an {"error": ..., "details": ...} shape.
+    """
+    api_key = get_current_api_key()
+    if not api_key:
+        return {"error": "Not authenticated. Provide ?api_key= or OAuth Bearer token."}
+
+    network = current_network.get() or networks.get("current", "mainnet")
+    client = _get_http_client(network)
+    ok_statuses = expect_status or [200, 201, 204]
+
+    try:
+        response = await client.request(
+            method,
+            path,
+            headers=get_auth_headers(),
+            json=body if body is not None else None,
+            params=params,
+        )
+
+        if response.status_code in ok_statuses:
+            if response.status_code == 204 or not response.content:
+                return {"success": True}
+            try:
+                return response.json()
+            except Exception:
+                return {"success": True, "raw": response.text}
+
+        # Truncate huge error bodies to keep MCP responses small
+        err_text = response.text
+        if len(err_text) > 2000:
+            err_text = err_text[:2000] + "... [truncated]"
+        logger.error(
+            f"Sokosumi API {method} {path} failed: {response.status_code} - {err_text}"
+        )
+        return {
+            "error": f"Request failed: {response.status_code}",
+            "details": err_text,
+        }
+    except httpx.TimeoutException as e:
+        logger.error(f"Timeout calling {method} {path}: {e}")
+        return {"error": "Request timed out", "details": str(e)}
+    except Exception as e:
+        logger.error(f"Error calling Sokosumi API {method} {path}: {e}")
+        return {"error": "Failed to connect to Sokosumi API", "details": str(e)}
 
 
 def get_current_user() -> Optional[Dict[str, Any]]:
@@ -358,48 +434,11 @@ async def list_agents() -> Dict[str, Any]:
     """
     Lists all available AI agents with their pricing and capabilities.
 
-    Returns:
-        A dictionary containing the list of available agents with their details:
-        - id: Agent identifier
-        - name: Agent name
-        - description: Agent description
-        - status: Agent status
-        - price: Credits required (including fee)
-        - tags: Associated tags
-        - isNew: Whether the agent is new
-        - isShown: Whether the agent is shown
+    Returns a list of agents with fields such as id, name, description,
+    status, price (credits required), tags, isNew, isShown.
     """
-    api_key = get_current_api_key()
-    if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+    return await _api_request("GET", "/v1/agents")
 
-    base_url = get_base_url()
-    url = f"{base_url}/v1/agents"
-
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                url,
-                headers=get_auth_headers(),
-                timeout=30.0
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                logger.info(f"Successfully retrieved {len(data.get('data', []))} agents")
-                return data
-            else:
-                logger.error(f"Failed to list agents: {response.status_code} - {response.text}")
-                return {
-                    "error": f"Failed to list agents: {response.status_code}",
-                    "details": response.text
-                }
-    except Exception as e:
-        logger.error(f"Error listing agents: {str(e)}")
-        return {
-            "error": "Failed to connect to Sokosumi API",
-            "details": str(e)
-        }
 
 @mcp.tool()
 async def get_agent_input_schema(agent_id: str) -> Dict[str, Any]:
@@ -410,102 +449,46 @@ async def get_agent_input_schema(agent_id: str) -> Dict[str, Any]:
         agent_id: The ID of the agent to get the input schema for
 
     Returns:
-        The input schema for the agent, describing required parameters
+        The input schema (and input_groups) describing required parameters.
+        This schema must be passed back to create_job().
     """
-    api_key = get_current_api_key()
-    if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
-
-    base_url = get_base_url()
-    url = f"{base_url}/v1/agents/{agent_id}/input-schema"
-
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                url,
-                headers=get_auth_headers(),
-                timeout=30.0
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                logger.info(f"Successfully retrieved input schema for agent {agent_id}")
-                return data
-            else:
-                logger.error(f"Failed to get input schema: {response.status_code} - {response.text}")
-                return {
-                    "error": f"Failed to get input schema: {response.status_code}",
-                    "details": response.text
-                }
-    except Exception as e:
-        logger.error(f"Error getting input schema: {str(e)}")
-        return {
-            "error": "Failed to connect to Sokosumi API",
-            "details": str(e)
-        }
+    return await _api_request("GET", f"/v1/agents/{agent_id}/input-schema")
 
 @mcp.tool()
 async def create_job(
     agent_id: str,
-    max_accepted_credits: float,
-    input_data: Optional[Dict[str, Any]] = None,
-    name: Optional[str] = None
+    input_schema: Dict[str, Any],
+    input_data: Dict[str, Any],
+    max_credits: Optional[float] = None,
+    name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Creates a new job for a specific agent.
 
+    You must first call get_agent_input_schema(agent_id) to obtain the exact
+    input_schema for the agent - it must be passed back in the job creation
+    payload so the server can validate input_data against it.
+
     Args:
         agent_id: The ID of the agent to create a job for
-        max_accepted_credits: Maximum credits you're willing to pay for this job
-        input_data: Input data for the agent (must match agent's input schema)
+        input_schema: The agent's input schema (from get_agent_input_schema)
+        input_data: Input data for the agent, matching the input schema
+        max_credits: Maximum credits you're willing to pay (optional - uses agent default if omitted)
         name: Optional name for the job
 
     Returns:
         The created job details including job ID and status
     """
-    api_key = get_current_api_key()
-    if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
-
-    base_url = get_base_url()
-    url = f"{base_url}/v1/agents/{agent_id}/jobs"
-
-    # Prepare request body
-    # Always request sharing within organization when creating (server may ignore if unsupported)
-    body = {
-        "maxAcceptedCredits": max_accepted_credits,
-        "shareOrganization": True,
+    body: Dict[str, Any] = {
+        "inputSchema": input_schema,
+        "inputData": input_data or {},
     }
-    if input_data is not None:
-        body["inputData"] = input_data
-    if name is not None:
+    if max_credits is not None and max_credits > 0:
+        body["maxCredits"] = max_credits
+    if name:
         body["name"] = name
 
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                json=body,
-                headers=get_auth_headers(),
-                timeout=30.0
-            )
-
-            if response.status_code in [200, 201]:
-                data = response.json()
-                logger.info(f"Successfully created job {data.get('data', {}).get('id')} for agent {agent_id}")
-                return data
-            else:
-                logger.error(f"Failed to create job: {response.status_code} - {response.text}")
-                return {
-                    "error": f"Failed to create job: {response.status_code}",
-                    "details": response.text
-                }
-    except Exception as e:
-        logger.error(f"Error creating job: {str(e)}")
-        return {
-            "error": "Failed to connect to Sokosumi API",
-            "details": str(e)
-        }
+    return await _api_request("POST", f"/v1/agents/{agent_id}/jobs", body=body)
 
 @mcp.tool()
 async def get_job(job_id: str) -> Dict[str, Any]:
@@ -516,44 +499,17 @@ async def get_job(job_id: str) -> Dict[str, Any]:
         job_id: The ID of the job to retrieve
 
     Returns:
-        Job details including:
-        - status: Current job status
-        - output: Job output (if completed)
-        - input: Original input data
-        - price: Credits charged
-        - timestamps: Various job lifecycle timestamps
+        Job details including status, output, input, price, and timestamps.
     """
-    api_key = get_current_api_key()
-    if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+    return await _api_request("GET", f"/v1/jobs/{job_id}")
 
-    base_url = get_base_url()
-    url = f"{base_url}/v1/jobs/{job_id}"
 
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                url,
-                headers=get_auth_headers(),
-                timeout=30.0
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                logger.info(f"Successfully retrieved job {job_id}")
-                return data
-            else:
-                logger.error(f"Failed to get job: {response.status_code} - {response.text}")
-                return {
-                    "error": f"Failed to get job: {response.status_code}",
-                    "details": response.text
-                }
-    except Exception as e:
-        logger.error(f"Error getting job: {str(e)}")
-        return {
-            "error": "Failed to connect to Sokosumi API",
-            "details": str(e)
-        }
+@mcp.tool()
+async def list_jobs() -> Dict[str, Any]:
+    """
+    Lists all jobs belonging to the authenticated user across all agents.
+    """
+    return await _api_request("GET", "/v1/jobs")
 
 
 @mcp.tool()
@@ -563,90 +519,446 @@ async def list_agent_jobs(agent_id: str) -> Dict[str, Any]:
 
     Args:
         agent_id: The ID of the agent to list jobs for
-
-    Returns:
-        List of jobs for the specified agent with full job details
     """
-    api_key = get_current_api_key()
-    if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+    return await _api_request("GET", f"/v1/agents/{agent_id}/jobs")
 
-    base_url = get_base_url()
-    url = f"{base_url}/v1/agents/{agent_id}/jobs"
 
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                url,
-                headers=get_auth_headers(),
-                timeout=30.0
-            )
+@mcp.tool()
+async def get_job_events(job_id: str) -> Dict[str, Any]:
+    """
+    Retrieves lifecycle events for a specific job (status transitions, logs,
+    input requests). Useful for debugging long-running jobs.
 
-            if response.status_code == 200:
-                data = response.json()
-                logger.info(f"Successfully retrieved {len(data.get('data', []))} jobs for agent {agent_id}")
-                return data
-            else:
-                logger.error(f"Failed to list agent jobs: {response.status_code} - {response.text}")
-                return {
-                    "error": f"Failed to list agent jobs: {response.status_code}",
-                    "details": response.text
-                }
-    except Exception as e:
-        logger.error(f"Error listing agent jobs: {str(e)}")
-        return {
-            "error": "Failed to connect to Sokosumi API",
-            "details": str(e)
-        }
+    Args:
+        job_id: The ID of the job
+    """
+    return await _api_request("GET", f"/v1/jobs/{job_id}/events")
+
+
+@mcp.tool()
+async def get_job_files(job_id: str) -> Dict[str, Any]:
+    """
+    Retrieves file outputs produced by a completed job.
+
+    Args:
+        job_id: The ID of the job
+    """
+    return await _api_request("GET", f"/v1/jobs/{job_id}/files")
+
+
+@mcp.tool()
+async def get_job_links(job_id: str) -> Dict[str, Any]:
+    """
+    Retrieves link outputs produced by a completed job.
+
+    Args:
+        job_id: The ID of the job
+    """
+    return await _api_request("GET", f"/v1/jobs/{job_id}/links")
+
+
+@mcp.tool()
+async def get_job_input_request(job_id: str) -> Dict[str, Any]:
+    """
+    Checks if a running job is waiting for additional input from the user.
+    Returns the input request (with eventId and schema) if one is pending,
+    or an empty response if the job does not currently need input.
+
+    Args:
+        job_id: The ID of the job
+    """
+    return await _api_request("GET", f"/v1/jobs/{job_id}/input-request")
+
+
+@mcp.tool()
+async def submit_job_input(
+    job_id: str,
+    event_id: str,
+    input_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Provides additional input to a job that is waiting on user input.
+    Call get_job_input_request first to get the event_id and required schema.
+
+    Args:
+        job_id: The ID of the job
+        event_id: The ID of the event awaiting input (from get_job_input_request)
+        input_data: Input data to provide, matching the requested schema
+    """
+    body = {"eventId": event_id, "inputData": input_data or {}}
+    return await _api_request("POST", f"/v1/jobs/{job_id}/inputs", body=body)
+
 
 @mcp.tool()
 async def get_user_profile() -> Dict[str, Any]:
     """
-    Gets the current user's profile information.
-
-    Returns:
-        User profile including:
-        - id: User identifier
-        - name: User's name
-        - email: User's email
-        - termsAccepted: Terms acceptance status
-        - marketingOptIn: Marketing preference
-        - timestamps: Account creation/update times
+    Gets the current user's profile information including id, name, email,
+    terms acceptance, marketing opt-in, and account timestamps.
     """
-    api_key = get_current_api_key()
-    if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+    return await _api_request("GET", "/v1/users/me")
 
-    base_url = get_base_url()
-    url = f"{base_url}/v1/users/me"
 
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                url,
-                headers=get_auth_headers(),
-                timeout=30.0
-            )
+# ============================================================================
+# Task tools (coworker orchestration)
+# ============================================================================
 
-            if response.status_code == 200:
-                data = response.json()
-                logger.info(f"Successfully retrieved user profile")
-                return data
-            else:
-                logger.error(f"Failed to get user profile: {response.status_code} - {response.text}")
-                return {
-                    "error": f"Failed to get user profile: {response.status_code}",
-                    "details": response.text
-                }
-    except Exception as e:
-        logger.error(f"Error getting user profile: {str(e)}")
-        return {
-            "error": "Failed to connect to Sokosumi API",
-            "details": str(e)
-        }
+@mcp.tool()
+async def list_tasks() -> Dict[str, Any]:
+    """
+    Lists all tasks for the authenticated user. Tasks group related agent
+    jobs together for multi-step workflows and coworker orchestration.
+    """
+    return await _api_request("GET", "/v1/tasks")
+
+
+@mcp.tool()
+async def get_task(task_id: str) -> Dict[str, Any]:
+    """
+    Retrieves a specific task by ID.
+
+    Args:
+        task_id: The ID of the task
+    """
+    return await _api_request("GET", f"/v1/tasks/{task_id}")
+
+
+@mcp.tool()
+async def create_task(
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    coworker_id: Optional[str] = None,
+    status: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Creates a new task for grouping agent jobs or orchestrating a coworker.
+
+    Args:
+        name: Task name (defaults to "New Task")
+        description: Task description
+        coworker_id: Optional coworker to assign the task to
+        status: Initial status, 'DRAFT' or 'READY'
+    """
+    body: Dict[str, Any] = {
+        "name": name or "New Task",
+        "description": description or "",
+    }
+    if coworker_id:
+        body["coworkerId"] = coworker_id
+    if status:
+        body["status"] = status
+    return await _api_request("POST", "/v1/tasks", body=body)
+
+
+@mcp.tool()
+async def update_task(
+    task_id: str,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    status: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Updates metadata of an existing task. Only provided fields are changed.
+
+    Args:
+        task_id: The ID of the task to update
+        name: New task name
+        description: New description
+        status: New status (DRAFT, READY, IN_PROGRESS, COMPLETED, ...)
+    """
+    body: Dict[str, Any] = {}
+    if name is not None:
+        body["name"] = name
+    if description is not None:
+        body["description"] = description
+    if status is not None:
+        body["status"] = status
+    return await _api_request("PATCH", f"/v1/tasks/{task_id}", body=body)
+
+
+@mcp.tool()
+async def delete_task(task_id: str) -> Dict[str, Any]:
+    """
+    Deletes a task. Associated jobs are not automatically deleted.
+
+    Args:
+        task_id: The ID of the task to delete
+    """
+    return await _api_request("DELETE", f"/v1/tasks/{task_id}")
+
+
+@mcp.tool()
+async def list_task_jobs(task_id: str) -> Dict[str, Any]:
+    """
+    Lists all jobs that belong to a specific task.
+
+    Args:
+        task_id: The ID of the task
+    """
+    return await _api_request("GET", f"/v1/tasks/{task_id}/jobs")
+
+
+@mcp.tool()
+async def add_job_to_task(
+    task_id: str,
+    agent_id: str,
+    input_schema: Dict[str, Any],
+    input_data: Dict[str, Any],
+    max_credits: Optional[float] = None,
+    name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Creates a new agent job inside an existing task.
+
+    Args:
+        task_id: The ID of the parent task
+        agent_id: The agent to run
+        input_schema: The agent's input schema (from get_agent_input_schema)
+        input_data: Input data for the agent
+        max_credits: Maximum credits willing to pay
+        name: Optional job name
+    """
+    body: Dict[str, Any] = {
+        "agentId": agent_id,
+        "inputSchema": input_schema,
+        "inputData": input_data or {},
+    }
+    if max_credits is not None and max_credits > 0:
+        body["maxCredits"] = max_credits
+    if name:
+        body["name"] = name
+    return await _api_request("POST", f"/v1/tasks/{task_id}/jobs", body=body)
+
+
+@mcp.tool()
+async def list_task_events(task_id: str) -> Dict[str, Any]:
+    """
+    Lists events (status changes, comments) for a task.
+
+    Args:
+        task_id: The ID of the task
+    """
+    return await _api_request("GET", f"/v1/tasks/{task_id}/events")
+
+
+@mcp.tool()
+async def create_task_event(
+    task_id: str,
+    status: Optional[str] = None,
+    comment: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Creates an event on a task - either a status update, a comment, or both.
+    At least one of status or comment must be provided.
+
+    Args:
+        task_id: The ID of the task
+        status: New task status (e.g. 'IN_PROGRESS', 'COMPLETED')
+        comment: Comment text
+    """
+    body: Dict[str, Any] = {}
+    if status:
+        body["status"] = status
+    if comment:
+        body["comment"] = comment
+    if not body:
+        return {"error": "At least one of status or comment must be provided"}
+    return await _api_request("POST", f"/v1/tasks/{task_id}/events", body=body)
+
+
+# ============================================================================
+# Coworker tools (agent marketplace management)
+# ============================================================================
+
+@mcp.tool()
+async def list_coworkers(
+    scope: Optional[str] = None,
+    capability: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Lists coworkers (agent identities) available to the authenticated user.
+
+    Args:
+        scope: Optional visibility scope filter (e.g. 'public', 'organization')
+        capability: Optional capability filter (e.g. 'chat', 'task'). For
+            multiple capabilities, pass a comma-separated string.
+    """
+    params: Dict[str, Any] = {}
+    if scope:
+        params["scope"] = scope
+    if capability:
+        # Support comma-separated for multiple values
+        caps = [c.strip() for c in capability.split(",") if c.strip()]
+        if caps:
+            params["capability"] = caps
+    return await _api_request("GET", "/v1/coworkers", params=params or None)
+
+
+@mcp.tool()
+async def get_coworker(coworker_id: str) -> Dict[str, Any]:
+    """
+    Retrieves a coworker by ID.
+
+    Args:
+        coworker_id: The ID of the coworker
+    """
+    return await _api_request("GET", f"/v1/coworkers/{coworker_id}")
+
+
+@mcp.tool()
+async def get_current_coworker() -> Dict[str, Any]:
+    """
+    Retrieves the coworker identity associated with the current auth token.
+    Only works when authenticated with a coworker API key.
+    """
+    return await _api_request("GET", "/v1/coworkers/me")
+
+
+@mcp.tool()
+async def create_coworker(
+    name: str,
+    caption: Optional[str] = None,
+    company: Optional[str] = None,
+    company_logo: Optional[str] = None,
+    url: Optional[str] = None,
+    base_url: Optional[str] = None,
+    description: Optional[str] = None,
+    image: Optional[str] = None,
+    capabilities: Optional[list] = None,
+    priority: Optional[int] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Creates a new coworker (a discoverable agent identity).
+
+    Args:
+        name: Display name (required)
+        caption: Short tagline
+        company: Company name
+        company_logo: URL to company logo
+        url: Public website URL
+        base_url: Agent API base URL
+        description: Long-form description
+        image: Avatar image URL
+        capabilities: List of capability tags (e.g. ['chat', 'task'])
+        priority: Integer priority for ranking in lists
+        metadata: Arbitrary key/value metadata
+    """
+    body: Dict[str, Any] = {"name": name}
+    if caption is not None: body["caption"] = caption
+    if company is not None: body["company"] = company
+    if company_logo is not None: body["companyLogo"] = company_logo
+    if url is not None: body["url"] = url
+    if base_url is not None: body["baseURL"] = base_url
+    if description is not None: body["description"] = description
+    if image is not None: body["image"] = image
+    if capabilities is not None: body["capabilities"] = capabilities
+    if priority is not None: body["priority"] = priority
+    if metadata is not None: body["metadata"] = metadata
+    return await _api_request("POST", "/v1/coworkers", body=body)
+
+
+@mcp.tool()
+async def update_coworker(
+    coworker_id: str,
+    name: Optional[str] = None,
+    caption: Optional[str] = None,
+    company: Optional[str] = None,
+    company_logo: Optional[str] = None,
+    url: Optional[str] = None,
+    base_url: Optional[str] = None,
+    description: Optional[str] = None,
+    image: Optional[str] = None,
+    capabilities: Optional[list] = None,
+    priority: Optional[int] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Updates a coworker. Only provided fields are changed.
+
+    Args:
+        coworker_id: The ID of the coworker to update
+        (other args: see create_coworker)
+    """
+    body: Dict[str, Any] = {}
+    if name is not None: body["name"] = name
+    if caption is not None: body["caption"] = caption
+    if company is not None: body["company"] = company
+    if company_logo is not None: body["companyLogo"] = company_logo
+    if url is not None: body["url"] = url
+    if base_url is not None: body["baseURL"] = base_url
+    if description is not None: body["description"] = description
+    if image is not None: body["image"] = image
+    if capabilities is not None: body["capabilities"] = capabilities
+    if priority is not None: body["priority"] = priority
+    if metadata is not None: body["metadata"] = metadata
+    return await _api_request("PATCH", f"/v1/coworkers/{coworker_id}", body=body)
+
+
+@mcp.tool()
+async def create_coworker_api_key(
+    coworker_id: str,
+    name: Optional[str] = None,
+    expires_at: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Creates an API key for a coworker. The raw key is returned ONCE in the
+    response and cannot be retrieved later.
+
+    Args:
+        coworker_id: The ID of the coworker
+        name: Optional label for the key
+        expires_at: Optional ISO 8601 timestamp when the key should expire
+    """
+    body: Dict[str, Any] = {}
+    if name is not None: body["name"] = name
+    if expires_at is not None: body["expiresAt"] = expires_at
+    return await _api_request(
+        "POST", f"/v1/coworkers/{coworker_id}/api-keys", body=body
+    )
+
+
+# ============================================================================
+# Category tools
+# ============================================================================
+
+@mcp.tool()
+async def list_categories() -> Dict[str, Any]:
+    """
+    Lists all agent categories available on the platform.
+    Useful for discovering agents by category.
+    """
+    return await _api_request("GET", "/v1/categories")
+
+
+@mcp.tool()
+async def get_category(category_id_or_slug: str) -> Dict[str, Any]:
+    """
+    Retrieves a category by its ID or slug.
+
+    Args:
+        category_id_or_slug: The category ID or URL slug
+    """
+    return await _api_request("GET", f"/v1/categories/{category_id_or_slug}")
 
 # ChatGPT Compatibility Tools
 # These tools are required for ChatGPT Connectors and deep research functionality
+
+import asyncio as _asyncio
+import json as _json
+
+
+def _chatgpt_error(message: str) -> Dict[str, Any]:
+    """Wrap an error in the ChatGPT content array format."""
+    return {"content": [{"type": "text", "text": _json.dumps({"error": message})}]}
+
+
+def _chatgpt_ok(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {"content": [{"type": "text", "text": _json.dumps(payload)}]}
+
+
+def _agent_base_url(network: str) -> str:
+    return "https://app.sokosumi.com" if network == "mainnet" else "https://preprod.sokosumi.com"
+
 
 @mcp.tool()
 async def search(query: str) -> Dict[str, Any]:
@@ -663,83 +975,34 @@ async def search(query: str) -> Dict[str, Any]:
         MCP content array with JSON-encoded search results containing:
         - results: Array of result objects with id, title, and url
     """
-    import json
+    result = await _api_request("GET", "/v1/agents")
+    if "error" in result:
+        return _chatgpt_error(result.get("error", "Failed to list agents"))
 
-    api_key = get_current_api_key()
-    if not api_key:
-        return {
-            "content": [{
-                "type": "text",
-                "text": json.dumps({"error": "No API key found. Please connect with ?api_key=xxx in URL"})
-            }]
+    agents = result.get("data", []) or []
+    query_lower = query.lower()
+    filtered = [
+        a for a in agents
+        if query_lower in (
+            f"{a.get('name', '')} {a.get('description', '')} "
+            f"{' '.join(a.get('tags', []) or [])}"
+        ).lower()
+    ] or agents  # fallback: all agents if nothing matches
+
+    network = current_network.get() or networks.get("current", "mainnet")
+    base_agent_url = _agent_base_url(network)
+
+    results = [
+        {
+            "id": a.get("id", ""),
+            "title": f"{a.get('name', 'Unnamed Agent')} - {a.get('price', 0)} credits",
+            "url": f"{base_agent_url}/agents/{a.get('id', '')}",
         }
+        for a in filtered[:20]
+    ]
+    logger.info(f"Search for '{query}' returned {len(results)} results")
+    return _chatgpt_ok({"results": results})
 
-    # Get all agents first
-    base_url = get_base_url()
-    url = f"{base_url}/v1/agents"
-
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                url,
-                headers=get_auth_headers(),
-                timeout=30.0
-            )
-
-            if response.status_code != 200:
-                logger.error(f"Failed to list agents: {response.status_code} - {response.text}")
-                return {
-                    "content": [{
-                        "type": "text",
-                        "text": json.dumps({"error": f"Failed to list agents: {response.status_code}"})
-                    }]
-                }
-
-            data = response.json()
-            agents = data.get('data', [])
-
-            # Filter agents based on query (simple text matching)
-            query_lower = query.lower()
-            filtered_agents = []
-
-            for agent in agents:
-                agent_text = f"{agent.get('name', '')} {agent.get('description', '')} {' '.join(agent.get('tags', []))}".lower()
-                if query_lower in agent_text:
-                    filtered_agents.append(agent)
-
-            # If no matches, return all agents (fallback)
-            if not filtered_agents:
-                filtered_agents = agents
-
-            # Format results for ChatGPT
-            network = current_network.get() or networks.get('current', 'mainnet')
-            base_agent_url = 'https://app.sokosumi.com' if network == 'mainnet' else 'https://preprod.sokosumi.com'
-
-            results = []
-            for agent in filtered_agents[:20]:  # Limit to 20 results
-                results.append({
-                    "id": agent.get('id', ''),
-                    "title": f"{agent.get('name', 'Unnamed Agent')} - {agent.get('price', 0)} credits",
-                    "url": f"{base_agent_url}/agents/{agent.get('id', '')}"
-                })
-
-            logger.info(f"Search for '{query}' returned {len(results)} results")
-
-            return {
-                "content": [{
-                    "type": "text",
-                    "text": json.dumps({"results": results})
-                }]
-            }
-
-    except Exception as e:
-        logger.error(f"Error searching agents: {str(e)}")
-        return {
-            "content": [{
-                "type": "text",
-                "text": json.dumps({"error": f"Failed to search agents: {str(e)}"})
-            }]
-        }
 
 @mcp.tool()
 async def fetch(id: str) -> Dict[str, Any]:
@@ -751,133 +1014,67 @@ async def fetch(id: str) -> Dict[str, Any]:
 
     Args:
         id: The unique identifier of the agent to fetch
-
-    Returns:
-        MCP content array with JSON-encoded document containing:
-        - id: Agent identifier
-        - title: Agent name and pricing
-        - text: Full agent details and input schema
-        - url: Link to agent page
-        - metadata: Additional agent metadata
     """
-    import json
+    # Run both API calls concurrently - this was the biggest win: previously
+    # the list fetch blocked the schema fetch.
+    agents_task = _api_request("GET", "/v1/agents")
+    schema_task = _api_request("GET", f"/v1/agents/{id}/input-schema")
+    agents_result, schema_result = await _asyncio.gather(agents_task, schema_task)
 
-    api_key = get_current_api_key()
-    if not api_key:
-        return {
-            "content": [{
-                "type": "text",
-                "text": json.dumps({"error": "No API key found. Please connect with ?api_key=xxx in URL"})
-            }]
-        }
+    if "error" in agents_result:
+        return _chatgpt_error(
+            f"Failed to fetch agent details: {agents_result.get('error')}"
+        )
 
-    base_url = get_base_url()
+    agent = next(
+        (a for a in agents_result.get("data", []) or [] if a.get("id") == id),
+        None,
+    )
+    if not agent:
+        return _chatgpt_error(f"Agent with id '{id}' not found")
 
-    try:
-        # Get agent details and input schema in parallel
-        async with httpx.AsyncClient() as client:
-            # Get agent list to find specific agent
-            agents_response = await client.get(
-                f"{base_url}/v1/agents",
-                headers=get_auth_headers(),
-                timeout=30.0
-            )
+    input_schema = (
+        schema_result.get("data", {}) if "error" not in schema_result else {}
+    )
 
-            if agents_response.status_code != 200:
-                logger.error(f"Failed to list agents: {agents_response.status_code}")
-                return {
-                    "content": [{
-                        "type": "text",
-                        "text": json.dumps({"error": f"Failed to fetch agent details: {agents_response.status_code}"})
-                    }]
-                }
+    network = current_network.get() or networks.get("current", "mainnet")
+    base_agent_url = _agent_base_url(network)
 
-            agents_data = agents_response.json()
-            agents = agents_data.get('data', [])
+    text_parts = [
+        f"Agent: {agent.get('name', 'Unnamed Agent')}",
+        f"Description: {agent.get('description', 'No description available')}",
+        f"Price: {agent.get('price', 0)} credits",
+        f"Status: {agent.get('status', 'unknown')}",
+    ]
+    if agent.get("tags"):
+        text_parts.append(f"Tags: {', '.join(agent['tags'])}")
+    if input_schema:
+        text_parts.append("\nInput Schema:")
+        text_parts.append(_json.dumps(input_schema, indent=2))
+    text_parts.extend([
+        "\nTo use this agent:",
+        f"1. Get input schema: get_agent_input_schema('{id}')",
+        f"2. Create job: create_job(agent_id='{id}', input_schema=<schema>, "
+        f"input_data={{...}}, max_credits={agent.get('price', 100)})",
+        "3. Monitor job: get_job(job_id)",
+    ])
 
-            # Find the specific agent
-            agent = None
-            for a in agents:
-                if a.get('id') == id:
-                    agent = a
-                    break
-
-            if not agent:
-                return {
-                    "content": [{
-                        "type": "text",
-                        "text": json.dumps({"error": f"Agent with id '{id}' not found"})
-                    }]
-                }
-
-            # Get input schema
-            schema_response = await client.get(
-                f"{base_url}/v1/agents/{id}/input-schema",
-                headers=get_auth_headers(),
-                timeout=30.0
-            )
-
-            input_schema = {}
-            if schema_response.status_code == 200:
-                input_schema = schema_response.json().get('data', {})
-
-            # Format full text content
-            network = current_network.get() or networks.get('current', 'mainnet')
-            base_agent_url = 'https://app.sokosumi.com' if network == 'mainnet' else 'https://preprod.sokosumi.com'
-
-            # Build comprehensive text description
-            text_parts = []
-            text_parts.append(f"Agent: {agent.get('name', 'Unnamed Agent')}")
-            text_parts.append(f"Description: {agent.get('description', 'No description available')}")
-            text_parts.append(f"Price: {agent.get('price', 0)} credits")
-            text_parts.append(f"Status: {agent.get('status', 'unknown')}")
-
-            if agent.get('tags'):
-                text_parts.append(f"Tags: {', '.join(agent.get('tags', []))}")
-
-            if input_schema:
-                text_parts.append("\nInput Schema:")
-                text_parts.append(json.dumps(input_schema, indent=2))
-
-            text_parts.append(f"\nTo use this agent:")
-            text_parts.append(f"1. Get input schema: get_agent_input_schema('{id}')")
-            text_parts.append(f"2. Create job: create_job(agent_id='{id}', max_accepted_credits={agent.get('price', 100)}, input_data={{...}})")
-            text_parts.append(f"3. Monitor job: get_job(job_id)")
-
-            full_text = "\n".join(text_parts)
-
-            result = {
-                "id": id,
-                "title": f"{agent.get('name', 'Unnamed Agent')} - {agent.get('price', 0)} credits",
-                "text": full_text,
-                "url": f"{base_agent_url}/agents/{id}",
-                "metadata": {
-                    "source": "sokosumi_api",
-                    "network": network,
-                    "agent_status": agent.get('status', 'unknown'),
-                    "price_credits": agent.get('price', 0),
-                    "tags": agent.get('tags', []),
-                    "has_input_schema": bool(input_schema)
-                }
-            }
-
-            logger.info(f"Successfully fetched agent details for {id}")
-
-            return {
-                "content": [{
-                    "type": "text",
-                    "text": json.dumps(result)
-                }]
-            }
-
-    except Exception as e:
-        logger.error(f"Error fetching agent {id}: {str(e)}")
-        return {
-            "content": [{
-                "type": "text",
-                "text": json.dumps({"error": f"Failed to fetch agent: {str(e)}"})
-            }]
-        }
+    result = {
+        "id": id,
+        "title": f"{agent.get('name', 'Unnamed Agent')} - {agent.get('price', 0)} credits",
+        "text": "\n".join(text_parts),
+        "url": f"{base_agent_url}/agents/{id}",
+        "metadata": {
+            "source": "sokosumi_api",
+            "network": network,
+            "agent_status": agent.get("status", "unknown"),
+            "price_credits": agent.get("price", 0),
+            "tags": agent.get("tags", []),
+            "has_input_schema": bool(input_schema),
+        },
+    }
+    logger.info(f"Successfully fetched agent details for {id}")
+    return _chatgpt_ok(result)
 
 
 # ============================================================================
