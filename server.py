@@ -356,17 +356,17 @@ async def _api_request(
 
 def get_current_user() -> Optional[Dict[str, Any]]:
     """
-    Get the current authenticated user from JWT context.
+    Get the current authenticated user from bearer-token validation context.
 
     Returns:
-        The user payload dict or None if not authenticated via JWT
+        The user payload dict or None if not authenticated via bearer token
     """
     return current_user.get()
 
 
 def is_authenticated() -> bool:
     """
-    Check if the current request is authenticated (via API key or JWT).
+    Check if the current request is authenticated (via API key or bearer token).
 
     Returns:
         True if authenticated, False otherwise
@@ -1021,7 +1021,7 @@ async def search(query: str) -> Dict[str, Any]:
         ).lower()
     ] or agents  # fallback: all agents if nothing matches
 
-    network = current_network.get() or networks.get("current", "mainnet")
+    network = normalize_network(current_network.get())
     base_agent_url = _agent_base_url(network)
 
     results = [
@@ -1069,7 +1069,7 @@ async def fetch(id: str) -> Dict[str, Any]:
         schema_result.get("data", {}) if "error" not in schema_result else {}
     )
 
-    network = current_network.get() or networks.get("current", "mainnet")
+    network = normalize_network(current_network.get())
     base_agent_url = _agent_base_url(network)
 
     text_parts = [
@@ -1110,275 +1110,167 @@ async def fetch(id: str) -> Dict[str, Any]:
 
 
 # ============================================================================
-# OAuth 2.1 Endpoint Handlers (Self-Contained Authorization Server)
+# OAuth 2.1 Endpoint Handlers (Thin Better Auth Resource Server)
 # ============================================================================
 
-async def oauth_protected_resource_metadata(request: Request) -> JSONResponse:
-    """
-    Serve OAuth 2.0 Protected Resource Metadata (RFC 9728).
+def _request_network(request: Request) -> str:
+    """Resolve the requested network from the query string."""
+    return normalize_network(request.query_params.get("network"))
 
-    This endpoint tells MCP clients where to authenticate.
-    """
-    return JSONResponse(get_protected_resource_metadata())
+
+def _copy_upstream_headers(response: httpx.Response) -> Dict[str, str]:
+    """Copy only the response headers that matter for OAuth clients."""
+    headers: Dict[str, str] = {}
+    for name in ("content-type", "cache-control", "www-authenticate"):
+        value = response.headers.get(name)
+        if value:
+            headers[name] = value
+    return headers
+
+
+async def _proxy_oauth_request(
+    method: str,
+    url: str,
+    *,
+    body: bytes = b"",
+    headers: Optional[Dict[str, str]] = None,
+) -> Response:
+    """Forward a request to the upstream Better Auth server."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        upstream = await client.request(
+            method,
+            url,
+            content=body if body else None,
+            headers=headers,
+        )
+
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        headers=_copy_upstream_headers(upstream),
+    )
+
+
+async def oauth_protected_resource_metadata(request: Request) -> JSONResponse:
+    """Serve OAuth 2.0 Protected Resource Metadata (RFC 9728)."""
+    return JSONResponse(get_protected_resource_metadata(_request_network(request)))
 
 
 async def oauth_authorization_server_metadata(request: Request) -> JSONResponse:
-    """
-    Serve OAuth 2.0 Authorization Server Metadata (RFC 8414).
-
-    This endpoint tells MCP clients the OAuth endpoints.
-    """
-    return JSONResponse(get_authorization_server_metadata())
+    """Serve OAuth 2.0 Authorization Server Metadata (RFC 8414)."""
+    return JSONResponse(get_authorization_server_metadata(_request_network(request)))
 
 
-async def oauth_jwks(request: Request) -> JSONResponse:
-    """
-    Serve the JWKS (JSON Web Key Set) for token verification.
-    """
-    return JSONResponse(get_jwks())
+async def oauth_jwks(request: Request) -> Response:
+    """Legacy compatibility proxy for cached clients that still hit /oauth/jwks."""
+    network = _request_network(request)
+    return await _proxy_oauth_request("GET", get_jwks_url(network))
 
 
 async def oauth_authorize(request: Request) -> Response:
     """
-    OAuth 2.1 Authorization Endpoint.
+    Legacy compatibility redirect for cached clients that still hit /oauth/authorize.
 
-    Redirects to Sokosumi's OAuth provider for authentication.
-    Supports PKCE (required by MCP spec).
+    New clients should discover and call Sokosumi Better Auth directly via the
+    advertised authorization server metadata.
     """
-    # Extract OAuth parameters from mcp-remote
-    client_id = request.query_params.get("client_id", "")
-    redirect_uri = request.query_params.get("redirect_uri", "")
-    response_type = request.query_params.get("response_type", "")
-    scope = request.query_params.get("scope", "mcp:read mcp:write")
-    state = request.query_params.get("state", "")
-    code_challenge = request.query_params.get("code_challenge", "")
-    code_challenge_method = request.query_params.get("code_challenge_method", "")
-    resource = request.query_params.get("resource")
+    network = _request_network(request)
+    query_params = [
+        (key, value)
+        for key, value in request.query_params.multi_items()
+        if key != "network"
+    ]
+    target_url = build_proxy_url("/authorize", network)
+    if query_params:
+        target_url = f"{target_url}?{urlencode(query_params, doseq=True)}"
 
-    # Validate required parameters
-    if response_type != "code":
-        return JSONResponse(
-            status_code=400,
-            content={"error": "unsupported_response_type", "error_description": "Only 'code' response type is supported"},
-        )
-
-    if not client_id:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "invalid_request", "error_description": "client_id is required"},
-        )
-
-    if not redirect_uri:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "invalid_request", "error_description": "redirect_uri is required"},
-        )
-
-    # PKCE is required per MCP spec
-    if not code_challenge:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "invalid_request", "error_description": "code_challenge is required (PKCE)"},
-        )
-
-    if code_challenge_method != "S256":
-        return JSONResponse(
-            status_code=400,
-            content={"error": "invalid_request", "error_description": "code_challenge_method must be S256"},
-        )
-
-    # Create MCP session to track mcp-remote's request
-    mcp_session_id = create_mcp_session(
-        client_id=client_id,
-        redirect_uri=redirect_uri,
-        code_challenge=code_challenge,
-        code_challenge_method=code_challenge_method,
-        scope=scope,
-        state=state,
-        resource=resource,
-    )
-
-    # Build Sokosumi OAuth URL and redirect user there
-    sokosumi_auth_url = build_sokosumi_auth_url(mcp_session_id)
-    logger.info(f"OAuth authorize: redirecting to Sokosumi for session {mcp_session_id[:8]}...")
-
-    return RedirectResponse(url=sokosumi_auth_url, status_code=302)
+    return RedirectResponse(url=target_url, status_code=302)
 
 
 async def oauth_callback(request: Request) -> Response:
-    """
-    OAuth Callback Endpoint.
-
-    Handles the callback from Sokosumi OAuth after user authentication.
-    Exchanges Sokosumi's code for tokens, then redirects back to mcp-remote.
-    """
-    # Extract callback parameters from Sokosumi
-    code = request.query_params.get("code", "")
-    state = request.query_params.get("state", "")
-    error = request.query_params.get("error", "")
-    error_description = request.query_params.get("error_description", "")
-
-    # Handle errors from Sokosumi
-    if error:
-        logger.error(f"Sokosumi OAuth error: {error} - {error_description}")
-        return HTMLResponse(
-            content=f"""
-            <!DOCTYPE html>
-            <html>
-            <head><title>Authentication Error</title></head>
-            <body style="font-family: sans-serif; padding: 40px; text-align: center;">
-                <h1>Authentication Failed</h1>
-                <p>Error: {error}</p>
-                <p>{error_description}</p>
-                <p><a href="https://app.sokosumi.com">Return to Sokosumi</a></p>
-            </body>
-            </html>
-            """,
-            status_code=400,
-        )
-
-    if not code or not state:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "invalid_request", "error_description": "Missing code or state"},
-        )
-
-    try:
-        # Exchange Sokosumi code for tokens
-        sokosumi_tokens = await exchange_sokosumi_code(code, state)
-        sokosumi_access_token = sokosumi_tokens["access_token"]
-        mcp_session_id = sokosumi_tokens["mcp_session_id"]
-
-        # Get user info from Sokosumi using the access token
-        async with httpx.AsyncClient() as client:
-            # Try to get user info from Sokosumi
-            user_response = await client.get(
-                f"{MAINNET_API_BASE_URL}/v1/users/me",
-                headers={"Authorization": f"Bearer {sokosumi_access_token}"},
-                timeout=10.0,
-            )
-
-            if user_response.status_code == 200:
-                user_data = user_response.json().get("data", {})
-                user_id = user_data.get("id", "unknown")
-            else:
-                # Fallback: extract from id_token if available
-                user_id = "authenticated_user"
-                logger.warning(f"Could not get user info from Sokosumi: {user_response.status_code}")
-
-        # Get the MCP session to retrieve mcp-remote's redirect_uri and state
-        mcp_session = get_mcp_session(mcp_session_id)
-        if not mcp_session:
-            # Session might have been consumed, try to get from stored data
-            raise ValueError("MCP session expired or not found")
-
-        # Create MCP auth code for mcp-remote
-        mcp_code = create_mcp_auth_code(mcp_session_id, sokosumi_access_token, user_id)
-
-        # Redirect back to mcp-remote with MCP's auth code
-        redirect_params = {
-            "code": mcp_code,
-            "state": mcp_session["state"],
-        }
-
-        redirect_url = f"{mcp_session['redirect_uri']}?{urlencode(redirect_params)}"
-        logger.info(f"OAuth callback successful, redirecting to mcp-remote: {redirect_url[:50]}...")
-
-        return RedirectResponse(url=redirect_url, status_code=302)
-
-    except ValueError as e:
-        logger.error(f"OAuth callback error: {e}")
-        return HTMLResponse(
-            content=f"""
-            <!DOCTYPE html>
-            <html>
-            <head><title>Authentication Error</title></head>
-            <body style="font-family: sans-serif; padding: 40px; text-align: center;">
-                <h1>Authentication Failed</h1>
-                <p>{str(e)}</p>
-                <p>Please try connecting again.</p>
-                <p><a href="https://app.sokosumi.com">Return to Sokosumi</a></p>
-            </body>
-            </html>
-            """,
-            status_code=400,
-        )
-    except Exception as e:
-        logger.error(f"OAuth callback unexpected error: {e}")
-        return HTMLResponse(
-            content=f"""
-            <!DOCTYPE html>
-            <html>
-            <head><title>Authentication Error</title></head>
-            <body style="font-family: sans-serif; padding: 40px; text-align: center;">
-                <h1>Authentication Failed</h1>
-                <p>An unexpected error occurred. Please try again.</p>
-                <p><a href="https://app.sokosumi.com">Return to Sokosumi</a></p>
-            </body>
-            </html>
-            """,
-            status_code=500,
-        )
+    """Explain that the MCP no longer terminates OAuth callbacks locally."""
+    return HTMLResponse(
+        content="""
+        <!DOCTYPE html>
+        <html>
+        <head><title>Reconnect Sokosumi MCP</title></head>
+        <body style="font-family: sans-serif; padding: 40px; text-align: center;">
+            <h1>Reconnect Required</h1>
+            <p>This MCP server now delegates OAuth directly to Sokosumi Better Auth.</p>
+            <p>Please reconnect the Sokosumi MCP in your client and retry the authorization flow.</p>
+            <p><a href="https://app.sokosumi.com">Return to Sokosumi</a></p>
+        </body>
+        </html>
+        """,
+        status_code=410,
+    )
 
 
 async def oauth_token(request: Request) -> Response:
-    """
-    OAuth 2.1 Token Endpoint.
+    """Legacy compatibility proxy for cached clients that still hit /oauth/token."""
+    network = _request_network(request)
+    body = await request.body()
+    headers: Dict[str, str] = {}
+    content_type = request.headers.get("content-type")
+    authorization = request.headers.get("authorization")
+    if content_type:
+        headers["content-type"] = content_type
+    if authorization:
+        headers["authorization"] = authorization
 
-    Exchanges authorization code for access token, or refreshes tokens.
-    """
-    # Parse form data
-    form = await request.form()
-    grant_type = form.get("grant_type", "")
+    return await _proxy_oauth_request(
+        "POST",
+        build_proxy_url("/token", network),
+        body=body,
+        headers=headers,
+    )
 
-    if grant_type == "authorization_code":
-        code = form.get("code", "")
-        code_verifier = form.get("code_verifier", "")
-        client_id = form.get("client_id", "")
-        redirect_uri = form.get("redirect_uri", "")
 
-        if not code or not code_verifier or not client_id or not redirect_uri:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "invalid_request", "error_description": "Missing required parameters"},
-            )
+def create_http_app():
+    """Create the Streamable HTTP ASGI app with auth and OAuth metadata routes."""
+    global _http_app
+    if _http_app is not None:
+        return _http_app
 
-        try:
-            tokens = exchange_code_for_tokens(code, code_verifier, client_id, redirect_uri)
-            logger.info(f"Token exchange successful for client: {client_id}")
-            return JSONResponse(tokens)
-        except ValueError as e:
-            logger.warning(f"Token exchange failed: {e}")
-            return JSONResponse(
-                status_code=400,
-                content={"error": "invalid_grant", "error_description": str(e)},
-            )
+    app = mcp.streamable_http_app()
+    oauth_routes = [
+        Route(
+            "/.well-known/oauth-protected-resource",
+            oauth_protected_resource_metadata,
+            methods=["GET"],
+        ),
+        Route(
+            "/.well-known/oauth-authorization-server",
+            oauth_authorization_server_metadata,
+            methods=["GET"],
+        ),
+        Route(
+            "/oauth/jwks",
+            oauth_jwks,
+            methods=["GET"],
+        ),
+        Route(
+            "/oauth/authorize",
+            oauth_authorize,
+            methods=["GET"],
+        ),
+        Route(
+            "/oauth/callback",
+            oauth_callback,
+            methods=["GET"],
+        ),
+        Route(
+            "/oauth/token",
+            oauth_token,
+            methods=["POST"],
+        ),
+    ]
+    for route in oauth_routes:
+        app.routes.insert(0, route)
 
-    elif grant_type == "refresh_token":
-        refresh_token = form.get("refresh_token", "")
-
-        if not refresh_token:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "invalid_request", "error_description": "refresh_token is required"},
-            )
-
-        try:
-            tokens = refresh_access_token(refresh_token)
-            logger.info("Token refresh successful")
-            return JSONResponse(tokens)
-        except ValueError as e:
-            logger.warning(f"Token refresh failed: {e}")
-            return JSONResponse(
-                status_code=400,
-                content={"error": "invalid_grant", "error_description": str(e)},
-            )
-
-    else:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "unsupported_grant_type", "error_description": "Supported: authorization_code, refresh_token"},
-        )
+    app.add_middleware(AuthenticationMiddleware)
+    _http_app = app
+    return app
 
 
 if __name__ == "__main__":
@@ -1394,50 +1286,9 @@ if __name__ == "__main__":
         try:
             # Get the ASGI app from FastMCP for Streamable HTTP
             # This is the modern standard (2025-06-18 spec)
-            app = mcp.streamable_http_app()
+            app = create_http_app()
             logger.info("Using Streamable HTTP transport")
-
-            # Add OAuth endpoints
-            oauth_routes = [
-                # Well-known endpoints
-                Route(
-                    "/.well-known/oauth-protected-resource",
-                    oauth_protected_resource_metadata,
-                    methods=["GET"],
-                ),
-                Route(
-                    "/.well-known/oauth-authorization-server",
-                    oauth_authorization_server_metadata,
-                    methods=["GET"],
-                ),
-                # OAuth endpoints
-                Route(
-                    "/oauth/jwks",
-                    oauth_jwks,
-                    methods=["GET"],
-                ),
-                Route(
-                    "/oauth/authorize",
-                    oauth_authorize,
-                    methods=["GET"],
-                ),
-                Route(
-                    "/oauth/callback",
-                    oauth_callback,
-                    methods=["GET"],
-                ),
-                Route(
-                    "/oauth/token",
-                    oauth_token,
-                    methods=["POST"],
-                ),
-            ]
-            for route in oauth_routes:
-                app.routes.insert(0, route)
-            logger.info("Added OAuth 2.1 endpoints (delegating to Sokosumi OAuth)")
-
-            # Add authentication middleware (API key or OAuth Bearer token)
-            app.add_middleware(AuthenticationMiddleware)
+            logger.info("Added OAuth metadata and compatibility proxy endpoints")
             logger.info("Added authentication middleware (API key + OAuth)")
 
             # Run with uvicorn
