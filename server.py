@@ -43,6 +43,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+MAINNET_API_BASE_URL = "https://api.sokosumi.com"
+PREPROD_API_BASE_URL = "https://preprod.api.sokosumi.com"
+
 # Create the FastMCP server instance with transport security configured for Railway
 # This allows the custom domain mcp.sokosumi.com to be used
 mcp = FastMCP(
@@ -209,9 +212,9 @@ def get_base_url(network: Optional[str] = None) -> str:
         network = current_network.get() or networks.get('current', 'mainnet')
 
     if network == 'preprod':
-        return 'https://preprod.sokosumi.com/api'
+        return PREPROD_API_BASE_URL
     else:
-        return 'https://app.sokosumi.com/api'
+        return MAINNET_API_BASE_URL
 
 # Helper function to get API key/token
 def get_current_api_key() -> Optional[str]:
@@ -250,9 +253,9 @@ def _get_http_client(network: str) -> httpx.AsyncClient:
     client = _http_clients.get(network)
     if client is None or client.is_closed:
         base_url = (
-            "https://preprod.sokosumi.com/api"
+            PREPROD_API_BASE_URL
             if network == "preprod"
-            else "https://app.sokosumi.com/api"
+            else MAINNET_API_BASE_URL
         )
         client = httpx.AsyncClient(
             base_url=base_url,
@@ -1221,7 +1224,7 @@ async def oauth_callback(request: Request) -> Response:
         async with httpx.AsyncClient() as client:
             # Try to get user info from Sokosumi
             user_response = await client.get(
-                "https://app.sokosumi.com/api/v1/users/me",
+                f"{MAINNET_API_BASE_URL}/v1/users/me",
                 headers={"Authorization": f"Bearer {sokosumi_access_token}"},
                 timeout=10.0,
             )

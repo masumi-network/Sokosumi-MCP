@@ -350,7 +350,7 @@ The MCP server implements a hybrid OAuth architecture:
 | `OAUTH_KEY_ID` | Key ID for JWKS | Auto-generated |
 
 ### Sokosumi API Integration
-- Base URLs: `https://preprod.sokosumi.com/api` (preprod) or `https://app.sokosumi.com/api` (mainnet)
+- Base URLs: `https://preprod.api.sokosumi.com` (preprod) or `https://api.sokosumi.com` (mainnet)
 - Authentication: Bearer token (OAuth) or x-api-key header (API key)
 - All API calls use async httpx client with 30s timeout
 - Comprehensive error handling and logging

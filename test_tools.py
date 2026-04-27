@@ -145,7 +145,7 @@ class MockTransport(httpx.AsyncBaseTransport):
 def _install_mock(network: str = "mainnet") -> MockTransport:
     """Replace the shared client with one using a mock transport."""
     transport = MockTransport()
-    base = "https://app.sokosumi.com/api" if network == "mainnet" else "https://preprod.sokosumi.com/api"
+    base = "https://api.sokosumi.com" if network == "mainnet" else "https://preprod.api.sokosumi.com"
     # Close any existing client so _get_http_client won't reuse it.
     existing = server._http_clients.pop(network, None)
     if existing is not None:
