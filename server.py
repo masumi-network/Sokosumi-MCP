@@ -57,6 +57,17 @@ current_user: ContextVar[Optional[Dict[str, Any]]] = ContextVar('current_user', 
 
 _http_app = None
 
+
+def _default_network() -> str:
+    """Return the configured default network for non-HTTP/stdio usage."""
+    return normalize_network(os.environ.get("SOKOSUMI_NETWORK"))
+
+
+def _default_api_key() -> Optional[str]:
+    """Return the configured default API key for non-HTTP/stdio usage."""
+    api_key = os.environ.get("SOKOSUMI_API_KEY", "").strip()
+    return api_key or None
+
 # Middleware for authentication (API key or OAuth Bearer token)
 class AuthenticationMiddleware(BaseHTTPMiddleware):
     """
@@ -194,7 +205,7 @@ def get_base_url(network: Optional[str] = None) -> str:
         The base URL for the API
     """
     if network is None:
-        network = normalize_network(current_network.get())
+        network = normalize_network(current_network.get() or _default_network())
 
     if network == 'preprod':
         return PREPROD_API_BASE_URL
@@ -209,7 +220,7 @@ def get_current_api_key() -> Optional[str]:
     Returns:
         The API key/token or None if not found
     """
-    return current_api_key.get()
+    return current_api_key.get() or _default_api_key()
 
 
 def get_auth_headers() -> Dict[str, str]:
@@ -314,7 +325,7 @@ async def _api_request(
     if not api_key:
         return {"error": "Not authenticated. Provide ?api_key= or OAuth Bearer token."}
 
-    network = normalize_network(current_network.get())
+    network = normalize_network(current_network.get() or _default_network())
     client = _get_http_client(network)
     ok_statuses = expect_status or [200, 201, 204]
 
@@ -1021,7 +1032,7 @@ async def search(query: str) -> Dict[str, Any]:
         ).lower()
     ] or agents  # fallback: all agents if nothing matches
 
-    network = normalize_network(current_network.get())
+    network = normalize_network(current_network.get() or _default_network())
     base_agent_url = _agent_base_url(network)
 
     results = [
@@ -1069,7 +1080,7 @@ async def fetch(id: str) -> Dict[str, Any]:
         schema_result.get("data", {}) if "error" not in schema_result else {}
     )
 
-    network = normalize_network(current_network.get())
+    network = normalize_network(current_network.get() or _default_network())
     base_agent_url = _agent_base_url(network)
 
     text_parts = [
