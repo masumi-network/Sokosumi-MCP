@@ -438,6 +438,30 @@ async def test_oauth_metadata_and_proxies() -> None:
             repr(metadata),
         )
 
+        response = await client.get("/.well-known/oauth-protected-resource")
+        resource_metadata = response.json()
+        _check(
+            "mainnet protected resource metadata keeps public MCP discovery local",
+            resource_metadata.get("authorization_servers") == ["https://mcp.sokosumi.com"],
+            repr(resource_metadata),
+        )
+
+        response = await client.get("/.well-known/oauth-protected-resource?network=preprod")
+        resource_metadata = response.json()
+        _check(
+            "preprod protected resource metadata advertises a distinct local auth server",
+            resource_metadata.get("authorization_servers") == ["https://mcp.sokosumi.com/preprod"],
+            repr(resource_metadata),
+        )
+
+        response = await client.get("/.well-known/oauth-authorization-server/preprod")
+        metadata = response.json()
+        _check(
+            "preprod local auth discovery path resolves to preprod Better Auth metadata",
+            metadata.get("issuer") == "https://preprod.sokosumi.com/api/auth",
+            repr(metadata),
+        )
+
         response = await client.get("/mcp?network=preprod")
         _check(
             "401 challenge preserves preprod discovery URL",
@@ -481,6 +505,29 @@ async def test_bearer_token_validation() -> None:
     _check("invalid bearer token returns no user", user is None, repr(user))
 
 
+async def test_stdio_env_fallback() -> None:
+    _section("11. STDIO env fallback")
+    transport = _install_mock("preprod")
+    server.current_api_key.set(None)
+    server.current_network.set(None)
+
+    with patch.dict(
+        "os.environ",
+        {
+            "SOKOSUMI_API_KEY": "ENV_TEST_KEY",
+            "SOKOSUMI_NETWORK": "preprod",
+        },
+        clear=False,
+    ):
+        await _run_tool("list_agents")
+
+    _check(
+        "stdio mode uses SOKOSUMI_NETWORK env fallback",
+        len(transport.calls) == 1 and transport.calls[0][1] == "/v1/agents",
+        repr(transport.calls),
+    )
+
+
 # ---------- main ------------------------------------------------------------
 
 async def main() -> int:
@@ -494,6 +541,7 @@ async def main() -> int:
     await test_search_filtering()
     await test_oauth_metadata_and_proxies()
     await test_bearer_token_validation()
+    await test_stdio_env_fallback()
 
     print("\n" + "=" * 60)
     print(f"PASSED: {len(_PASSED)}   FAILED: {len(_FAILED)}")
