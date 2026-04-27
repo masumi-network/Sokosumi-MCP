@@ -9,9 +9,8 @@ import os
 import logging
 import sys
 from typing import Optional, Dict, Any
-from urllib.parse import urlencode, parse_qs
+from urllib.parse import urlencode
 import httpx
-import jwt
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -21,18 +20,12 @@ from starlette.routing import Route
 from contextvars import ContextVar
 
 from oauth import (
-    validate_access_token,
     get_protected_resource_metadata,
     get_authorization_server_metadata,
     get_www_authenticate_header,
-    get_jwks,
-    create_mcp_session,
-    get_mcp_session,
-    build_sokosumi_auth_url,
-    exchange_sokosumi_code,
-    create_mcp_auth_code,
-    exchange_code_for_tokens,
-    refresh_access_token,
+    build_proxy_url,
+    get_jwks_url,
+    normalize_network,
 )
 
 # Set up logging
@@ -57,21 +50,19 @@ mcp = FastMCP(
     )
 )
 
-# Simple in-memory storage for demonstration
-api_keys = {}
-networks = {}
-
 # Context variables to store request-specific data
 current_api_key: ContextVar[Optional[str]] = ContextVar('current_api_key', default=None)
 current_network: ContextVar[Optional[str]] = ContextVar('current_network', default=None)
 current_user: ContextVar[Optional[Dict[str, Any]]] = ContextVar('current_user', default=None)
+
+_http_app = None
 
 # Middleware for authentication (API key or OAuth Bearer token)
 class AuthenticationMiddleware(BaseHTTPMiddleware):
     """
     Authentication middleware supporting dual auth:
     1. API key (query param ?api_key= or header x-api-key)
-    2. OAuth 2.1 Bearer token (Authorization: Bearer <jwt>)
+    2. OAuth 2.1 Bearer token (Authorization: Bearer <token>)
 
     Priority: API key takes precedence over Bearer token.
     If neither is provided/valid, returns 401 with WWW-Authenticate header.
@@ -88,18 +79,14 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 return await call_next(request)
 
             # Extract network from query parameters (preprod or mainnet)
-            network = request.query_params.get('network', 'mainnet')
-            if network not in ['preprod', 'mainnet']:
-                network = 'mainnet'
+            network = normalize_network(request.query_params.get('network'))
             network_token = current_network.set(network)
-            networks["current"] = network
             logger.info(f"Using network: {network}")
 
             # Try API key authentication first
             api_key = self._extract_api_key(request)
             if api_key:
                 api_token = current_api_key.set(api_key)
-                api_keys["current"] = api_key
                 logger.info(f"Authenticated via API key: {api_key[:8]}..." if len(api_key) > 8 else "API key auth")
                 response = await call_next(request)
                 return self._cleanup_and_return(response, api_token, network_token, user_token)
@@ -108,32 +95,30 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             bearer_token = self._extract_bearer_token(request)
             if bearer_token:
                 try:
-                    user_payload = await validate_access_token(bearer_token)
+                    user_payload = await _validate_bearer_token(bearer_token, network)
+                    if not user_payload:
+                        logger.warning("Invalid upstream bearer token")
+                        return self._unauthorized_response("Invalid or expired token", network)
+
                     user_token = current_user.set(user_payload)
-
-                    # Extract Sokosumi token from JWT payload for downstream API calls
-                    # This is the Sokosumi OAuth access token obtained during authentication
-                    sokosumi_token = user_payload.get('sokosumi_token')
-                    if sokosumi_token:
-                        # Store the Sokosumi token as the "API key" for downstream calls
-                        # The Sokosumi API accepts Bearer tokens as well
-                        api_token = current_api_key.set(sokosumi_token)
-                        api_keys["current"] = sokosumi_token
-
-                    logger.info(f"Authenticated via JWT for user: {user_payload.get('sub', 'unknown')}")
+                    api_token = current_api_key.set(bearer_token)
+                    logger.info(f"Authenticated via bearer token for user: {user_payload.get('id', 'unknown')}")
                     response = await call_next(request)
                     return self._cleanup_and_return(response, api_token, network_token, user_token)
-                except jwt.InvalidTokenError as e:
-                    logger.warning(f"Invalid JWT token: {e}")
-                    return self._unauthorized_response("Invalid or expired token")
+                except UpstreamAuthError as e:
+                    logger.error(f"Bearer token validation error: {e}")
+                    return JSONResponse(
+                        status_code=502,
+                        content={"error": "Bad Gateway", "detail": "Authentication upstream unavailable"},
+                    )
                 except Exception as e:
-                    logger.error(f"JWT validation error: {e}")
-                    return self._unauthorized_response("Token validation failed")
+                    logger.error(f"Unexpected bearer validation error: {e}")
+                    return self._unauthorized_response("Token validation failed", network)
 
             # No valid authentication - return 401
             # Only require auth for /mcp endpoint, allow other endpoints through
             if request.url.path.startswith("/mcp"):
-                return self._unauthorized_response("Authentication required")
+                return self._unauthorized_response("Authentication required", network)
 
             # Allow non-MCP endpoints through (health checks, etc.)
             response = await call_next(request)
@@ -164,12 +149,12 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             return auth_header[7:]  # Remove "Bearer " prefix
         return None
 
-    def _unauthorized_response(self, detail: str) -> Response:
+    def _unauthorized_response(self, detail: str, network: Optional[str] = None) -> Response:
         """Return a 401 Unauthorized response with WWW-Authenticate header."""
         return JSONResponse(
             status_code=401,
             content={"error": "Unauthorized", "detail": detail},
-            headers={"WWW-Authenticate": get_www_authenticate_header()},
+            headers={"WWW-Authenticate": get_www_authenticate_header(network)},
         )
 
     def _cleanup_and_return(
@@ -209,7 +194,7 @@ def get_base_url(network: Optional[str] = None) -> str:
         The base URL for the API
     """
     if network is None:
-        network = current_network.get() or networks.get('current', 'mainnet')
+        network = normalize_network(current_network.get())
 
     if network == 'preprod':
         return PREPROD_API_BASE_URL
@@ -219,12 +204,12 @@ def get_base_url(network: Optional[str] = None) -> str:
 # Helper function to get API key/token
 def get_current_api_key() -> Optional[str]:
     """
-    Get the current API key or OAuth token from context or storage.
+    Get the current API key or OAuth token from context.
 
     Returns:
         The API key/token or None if not found
     """
-    return current_api_key.get() or api_keys.get('current')
+    return current_api_key.get()
 
 
 def get_auth_headers() -> Dict[str, str]:
@@ -248,6 +233,10 @@ def get_auth_headers() -> Dict[str, str]:
 _http_clients: Dict[str, httpx.AsyncClient] = {}
 
 
+class UpstreamAuthError(RuntimeError):
+    """Raised when the upstream auth/resource server cannot validate a token."""
+
+
 def _get_http_client(network: str) -> httpx.AsyncClient:
     """Return (and lazily create) a shared AsyncClient for the given network."""
     client = _http_clients.get(network)
@@ -265,6 +254,46 @@ def _get_http_client(network: str) -> httpx.AsyncClient:
         )
         _http_clients[network] = client
     return client
+
+
+async def _validate_bearer_token(
+    token: str,
+    network: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Validate a bearer token against the real Sokosumi API auth stack.
+
+    The upstream `/v1/users/me` endpoint already accepts the same Better Auth
+    OAuth access tokens and API keys used by the product, so using it here
+    avoids maintaining a second token universe inside the MCP server.
+    """
+    client = _get_http_client(network)
+
+    try:
+        response = await client.get(
+            "/v1/users/me",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+        )
+    except httpx.HTTPError as e:
+        raise UpstreamAuthError(str(e)) from e
+
+    if response.status_code == 200:
+        payload = response.json()
+        if isinstance(payload, dict):
+            data = payload.get("data")
+            if isinstance(data, dict):
+                return data
+        return None
+
+    if response.status_code in {401, 403}:
+        return None
+
+    raise UpstreamAuthError(
+        f"Unexpected status from /v1/users/me: {response.status_code}"
+    )
 
 
 async def _api_request(
@@ -285,7 +314,7 @@ async def _api_request(
     if not api_key:
         return {"error": "Not authenticated. Provide ?api_key= or OAuth Bearer token."}
 
-    network = current_network.get() or networks.get("current", "mainnet")
+    network = normalize_network(current_network.get())
     client = _get_http_client(network)
     ok_statuses = expect_status or [200, 201, 204]
 
