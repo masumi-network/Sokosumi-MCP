@@ -60,7 +60,7 @@ def get_protected_resource_metadata(network: Optional[str] = None) -> Dict[str, 
     """OAuth 2.0 Protected Resource Metadata (RFC 9728)."""
     return {
         "resource": MCP_SERVER_URL,
-        "authorization_servers": [get_auth_issuer(network)],
+        "authorization_servers": [MCP_SERVER_URL],
         "bearer_methods_supported": ["header"],
         "scopes_supported": ["openid", "offline_access"],
     }
