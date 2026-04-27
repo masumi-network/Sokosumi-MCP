@@ -157,6 +157,15 @@ def _install_mock(network: str = "mainnet") -> MockTransport:
     return transport
 
 
+def _http_client() -> httpx.AsyncClient:
+    """Build an ASGI client for the HTTP transport surface."""
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=server.create_http_app()),
+        base_url="http://testserver",
+        follow_redirects=False,
+    )
+
+
 async def _run_tool(tool_name: str, **kwargs: Any) -> Any:
     """Invoke a tool by calling the underlying Python function directly.
 
@@ -198,9 +207,8 @@ async def test_tool_registration() -> None:
 
 async def test_auth_gating() -> None:
     _section("2. Auth gating - every tool returns error when unauthenticated")
-    # Reset api key context
-    server.api_keys.pop("current", None)
     server.current_api_key.set(None)
+    server.current_user.set(None)
 
     # A representative sample (testing every single one would be noisy).
     samples: List[Tuple[str, Dict[str, Any]]] = [
@@ -226,9 +234,7 @@ async def test_auth_gating() -> None:
 async def test_http_correctness() -> None:
     _section("3. HTTP method + path correctness (mocked transport)")
     transport = _install_mock()
-    server.api_keys["current"] = "TEST_KEY"
     server.current_api_key.set("TEST_KEY")
-    server.networks["current"] = "mainnet"
     server.current_network.set("mainnet")
 
     cases: List[Tuple[str, Dict[str, Any], str, str]] = [
@@ -268,7 +274,6 @@ async def test_http_correctness() -> None:
 async def test_payload_shapes() -> None:
     _section("4. Payload correctness (new API contract)")
     transport = _install_mock()
-    server.api_keys["current"] = "TEST_KEY"
     server.current_api_key.set("TEST_KEY")
     transport.program("POST", "/v1/agents/A/jobs", 201, {"data": {"id": "J"}})
     transport.program("POST", "/v1/tasks/T/jobs", 201, {"data": {"id": "J"}})
@@ -342,7 +347,6 @@ async def test_payload_shapes() -> None:
 async def test_error_handling() -> None:
     _section("5. Error handling (non-2xx responses)")
     transport = _install_mock()
-    server.api_keys["current"] = "TEST_KEY"
     server.current_api_key.set("TEST_KEY")
     transport.program("GET", "/v1/jobs/MISSING", 404, {"error": "not found"})
 
@@ -357,7 +361,6 @@ async def test_fetch_parallel() -> None:
     transport.set_latency(0.15)  # 150ms each - serial would be ~300ms
     transport.program("GET", "/v1/agents", 200, {"data": [{"id": "A", "name": "Agent A", "price": 10}]})
     transport.program("GET", "/v1/agents/A/input-schema", 200, {"data": {"fields": []}})
-    server.api_keys["current"] = "TEST_KEY"
     server.current_api_key.set("TEST_KEY")
 
     t0 = time.perf_counter()
@@ -378,7 +381,6 @@ async def test_client_reuse() -> None:
     _section("7. HTTP client is reused across requests")
     # Install fresh mock, make several calls, assert client identity unchanged.
     transport = _install_mock()
-    server.api_keys["current"] = "TEST_KEY"
     server.current_api_key.set("TEST_KEY")
     client_before = server._http_clients.get("mainnet")
     await _run_tool("list_agents")
@@ -400,7 +402,6 @@ async def test_client_reuse() -> None:
 async def test_search_filtering() -> None:
     _section("8. search() keyword filtering + format")
     transport = _install_mock()
-    server.api_keys["current"] = "TEST_KEY"
     server.current_api_key.set("TEST_KEY")
     transport.program("GET", "/v1/agents", 200, {"data": [
         {"id": "1", "name": "Image Generator", "description": "makes images", "price": 5, "tags": []},
@@ -416,6 +417,70 @@ async def test_search_filtering() -> None:
     )
 
 
+async def test_oauth_metadata_and_proxies() -> None:
+    _section("9. OAuth metadata + compatibility proxies")
+    async with _http_client() as client:
+        response = await client.get("/.well-known/oauth-authorization-server")
+        metadata = response.json()
+        _check(
+            "mainnet auth metadata points to Sokosumi Better Auth",
+            metadata.get("issuer") == "https://app.sokosumi.com/api/auth"
+            and metadata.get("authorization_endpoint") == "https://app.sokosumi.com/api/auth/oauth2/authorize",
+            repr(metadata),
+        )
+
+        response = await client.get("/.well-known/oauth-authorization-server?network=preprod")
+        metadata = response.json()
+        _check(
+            "preprod auth metadata points to preprod Better Auth",
+            metadata.get("issuer") == "https://preprod.sokosumi.com/api/auth"
+            and metadata.get("token_endpoint") == "https://preprod.sokosumi.com/api/auth/oauth2/token",
+            repr(metadata),
+        )
+
+        response = await client.get("/mcp?network=preprod")
+        _check(
+            "401 challenge preserves preprod discovery URL",
+            response.status_code == 401
+            and "network=preprod" in response.headers.get("www-authenticate", ""),
+            repr(dict(response.headers)),
+        )
+
+        response = await client.get(
+            "/oauth/authorize",
+            params={
+                "client_id": "test-client",
+                "redirect_uri": "https://consumer.example.com/callback",
+                "response_type": "code",
+                "code_challenge": "challenge",
+                "code_challenge_method": "S256",
+                "state": "test-state",
+                "network": "preprod",
+            },
+        )
+        location = response.headers.get("location", "")
+        _check(
+            "legacy /oauth/authorize redirects to upstream preprod authorize endpoint",
+            response.status_code == 302
+            and location.startswith("https://preprod.sokosumi.com/api/auth/oauth2/authorize?")
+            and "network=preprod" not in location,
+            location,
+        )
+
+
+async def test_bearer_token_validation() -> None:
+    _section("10. Bearer token validation")
+    transport = _install_mock()
+    transport.program("GET", "/v1/users/me", 200, {"data": {"id": "user_123"}})
+    user = await server._validate_bearer_token("ACCESS_TOKEN", "mainnet")
+    _check("valid bearer token resolves upstream user", user == {"id": "user_123"}, repr(user))
+
+    transport = _install_mock("preprod")
+    transport.program("GET", "/v1/users/me", 401, {"error": "unauthorized"})
+    user = await server._validate_bearer_token("BAD_TOKEN", "preprod")
+    _check("invalid bearer token returns no user", user is None, repr(user))
+
+
 # ---------- main ------------------------------------------------------------
 
 async def main() -> int:
@@ -427,6 +492,8 @@ async def main() -> int:
     await test_fetch_parallel()
     await test_client_reuse()
     await test_search_filtering()
+    await test_oauth_metadata_and_proxies()
+    await test_bearer_token_validation()
 
     print("\n" + "=" * 60)
     print(f"PASSED: {len(_PASSED)}   FAILED: {len(_FAILED)}")
