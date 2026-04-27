@@ -1172,6 +1172,14 @@ async def oauth_authorization_server_metadata(request: Request) -> JSONResponse:
     return JSONResponse(get_authorization_server_metadata(_request_network(request)))
 
 
+async def oauth_authorization_server_metadata_for_path(
+    request: Request,
+) -> JSONResponse:
+    """Serve network-specific local discovery paths such as /preprod."""
+    network = normalize_network(request.path_params.get("network"))
+    return JSONResponse(get_authorization_server_metadata(network))
+
+
 async def oauth_jwks(request: Request) -> Response:
     """Legacy compatibility proxy for cached clients that still hit /oauth/jwks."""
     network = _request_network(request)
@@ -1253,6 +1261,11 @@ def create_http_app():
         Route(
             "/.well-known/oauth-authorization-server",
             oauth_authorization_server_metadata,
+            methods=["GET"],
+        ),
+        Route(
+            "/.well-known/oauth-authorization-server/{network}",
+            oauth_authorization_server_metadata_for_path,
             methods=["GET"],
         ),
         Route(

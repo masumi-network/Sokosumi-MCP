@@ -58,9 +58,15 @@ def build_proxy_url(
 
 def get_protected_resource_metadata(network: Optional[str] = None) -> Dict[str, Any]:
     """OAuth 2.0 Protected Resource Metadata (RFC 9728)."""
+    normalized = normalize_network(network)
+    authorization_server = (
+        f"{MCP_SERVER_URL}/preprod"
+        if normalized == "preprod"
+        else MCP_SERVER_URL
+    )
     return {
         "resource": MCP_SERVER_URL,
-        "authorization_servers": [MCP_SERVER_URL],
+        "authorization_servers": [authorization_server],
         "bearer_methods_supported": ["header"],
         "scopes_supported": ["openid", "offline_access"],
     }
