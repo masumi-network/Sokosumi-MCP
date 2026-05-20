@@ -21,6 +21,7 @@ from starlette.routing import Route
 from contextvars import ContextVar
 
 from oauth import (
+    SOKOSUMI_USERINFO_ENDPOINT,
     validate_access_token,
     get_protected_resource_metadata,
     get_authorization_server_metadata,
@@ -1589,20 +1590,27 @@ async def oauth_callback(request: Request) -> Response:
         # Exchange Sokosumi code for tokens
         sokosumi_tokens = await exchange_sokosumi_code(code, state)
         sokosumi_access_token = sokosumi_tokens["access_token"]
+        sokosumi_refresh_token = sokosumi_tokens.get("refresh_token")
         mcp_session_id = sokosumi_tokens["mcp_session_id"]
 
         # Get user info from Sokosumi using the access token
         async with httpx.AsyncClient() as client:
-            # Try to get user info from Sokosumi
             user_response = await client.get(
-                "https://app.sokosumi.com/api/v1/users/me",
+                SOKOSUMI_USERINFO_ENDPOINT,
                 headers={"Authorization": f"Bearer {sokosumi_access_token}"},
                 timeout=10.0,
             )
 
             if user_response.status_code == 200:
-                user_data = user_response.json().get("data", {})
-                user_id = user_data.get("id", "unknown")
+                user_info = user_response.json()
+                user_data = user_info.get("data", user_info) if isinstance(user_info, dict) else {}
+                user_id = (
+                    user_data.get("sub")
+                    or user_data.get("id")
+                    or user_data.get("userId")
+                    or user_data.get("email")
+                    or "authenticated_user"
+                )
             else:
                 # Fallback: extract from id_token if available
                 user_id = "authenticated_user"
@@ -1615,7 +1623,12 @@ async def oauth_callback(request: Request) -> Response:
             raise ValueError("MCP session expired or not found")
 
         # Create MCP auth code for mcp-remote
-        mcp_code = create_mcp_auth_code(mcp_session_id, sokosumi_access_token, user_id)
+        mcp_code = create_mcp_auth_code(
+            mcp_session_id,
+            sokosumi_access_token,
+            user_id,
+            sokosumi_refresh_token=sokosumi_refresh_token,
+        )
 
         # Redirect back to mcp-remote with MCP's auth code
         redirect_params = {
@@ -1706,7 +1719,7 @@ async def oauth_token(request: Request) -> Response:
             )
 
         try:
-            tokens = refresh_access_token(refresh_token)
+            tokens = await refresh_access_token(refresh_token)
             logger.info("Token refresh successful")
             return JSONResponse(tokens)
         except ValueError as e:

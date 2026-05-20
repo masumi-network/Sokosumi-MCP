@@ -258,6 +258,11 @@ Do not commit API keys or OAuth tokens. Use the hosted OAuth flow for normal usa
 | `SOKOSUMI_API_BASE_URL` | No | Override the Sokosumi API base URL | None |
 | `SOKOSUMI_MAINNET_API_BASE_URL` | No | Mainnet API base URL | `https://api.sokosumi.com` |
 | `SOKOSUMI_PREPROD_API_BASE_URL` | No | Preprod API base URL | `https://api.preprod.sokosumi.com` |
+| `SOKOSUMI_OAUTH_NETWORK` | No | OAuth provider network for hosted MCP auth | `SOKOSUMI_NETWORK` or `mainnet` |
+| `SOKOSUMI_OAUTH_BASE_URL` | No | Override the Better Auth OAuth root | `https://api.sokosumi.com/auth` |
+| `SOKOSUMI_OAUTH_MAINNET_BASE_URL` | No | Mainnet Better Auth OAuth root | `https://api.sokosumi.com/auth` |
+| `SOKOSUMI_OAUTH_PREPROD_BASE_URL` | No | Preprod Better Auth OAuth root | `https://api.preprod.sokosumi.com/auth` |
+| `SOKOSUMI_OAUTH_SCOPE` | No | Sokosumi OAuth scopes requested by the MCP bridge | `openid offline_access` |
 
 ## Available Tools
 

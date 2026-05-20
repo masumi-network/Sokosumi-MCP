@@ -7,7 +7,7 @@ This module implements:
 
 Flow:
 1. mcp-remote → MCP /oauth/authorize
-2. MCP → Sokosumi /api/auth/oauth2/authorize (user logs in)
+2. MCP → Sokosumi /auth/oauth2/authorize (user logs in)
 3. Sokosumi → MCP /oauth/callback (with auth code)
 4. MCP exchanges code with Sokosumi for access token
 5. MCP → mcp-remote callback (with MCP's auth code)
@@ -35,11 +35,46 @@ logger = logging.getLogger(__name__)
 # Server URLs
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "https://mcp.sokosumi.com")
 
-# Sokosumi OAuth configuration
-# Base URL for Sokosumi platform (auth endpoints are at /api/auth/)
-SOKOSUMI_OAUTH_BASE_URL = os.environ.get("SOKOSUMI_OAUTH_BASE_URL", "https://app.sokosumi.com")
-SOKOSUMI_AUTH_ENDPOINT = f"{SOKOSUMI_OAUTH_BASE_URL}/api/auth/oauth2/authorize"
-SOKOSUMI_TOKEN_ENDPOINT = f"{SOKOSUMI_OAUTH_BASE_URL}/api/auth/oauth2/token"
+# Sokosumi OAuth configuration.
+# Better Auth is served from the API host under /auth. SOKOSUMI_OAUTH_BASE_URL
+# may point either to the auth root or to a legacy platform/API root; normalize it
+# so deployments can override safely.
+SOKOSUMI_OAUTH_NETWORK = os.environ.get(
+    "SOKOSUMI_OAUTH_NETWORK",
+    os.environ.get("SOKOSUMI_NETWORK", "mainnet"),
+).lower()
+SOKOSUMI_OAUTH_MAINNET_BASE_URL = os.environ.get(
+    "SOKOSUMI_OAUTH_MAINNET_BASE_URL",
+    "https://api.sokosumi.com/auth",
+)
+SOKOSUMI_OAUTH_PREPROD_BASE_URL = os.environ.get(
+    "SOKOSUMI_OAUTH_PREPROD_BASE_URL",
+    "https://api.preprod.sokosumi.com/auth",
+)
+
+
+def _normalize_sokosumi_oauth_base_url(base_url: str) -> str:
+    """Return the Better Auth root for a platform or API base URL."""
+    base_url = base_url.rstrip("/")
+    if base_url.endswith("/auth") or base_url.endswith("/api/auth"):
+        return base_url
+    if "api.sokosumi.com" in base_url or "api.preprod.sokosumi.com" in base_url:
+        return f"{base_url}/auth"
+    return f"{base_url}/api/auth"
+
+
+_default_oauth_base_url = (
+    SOKOSUMI_OAUTH_PREPROD_BASE_URL
+    if SOKOSUMI_OAUTH_NETWORK == "preprod"
+    else SOKOSUMI_OAUTH_MAINNET_BASE_URL
+)
+SOKOSUMI_OAUTH_BASE_URL = _normalize_sokosumi_oauth_base_url(
+    os.environ.get("SOKOSUMI_OAUTH_BASE_URL", _default_oauth_base_url)
+)
+SOKOSUMI_AUTH_ENDPOINT = f"{SOKOSUMI_OAUTH_BASE_URL}/oauth2/authorize"
+SOKOSUMI_TOKEN_ENDPOINT = f"{SOKOSUMI_OAUTH_BASE_URL}/oauth2/token"
+SOKOSUMI_USERINFO_ENDPOINT = f"{SOKOSUMI_OAUTH_BASE_URL}/oauth2/userinfo"
+SOKOSUMI_OAUTH_SCOPE = os.environ.get("SOKOSUMI_OAUTH_SCOPE", "openid offline_access")
 
 # OAuth client credentials (set via environment)
 OAUTH_CLIENT_ID = os.environ.get("OAUTH_CLIENT_ID", "")
@@ -167,6 +202,20 @@ def get_www_authenticate_header(scope: Optional[str] = None) -> str:
     return header
 
 
+def _sokosumi_token_request_payload(grant_type: str, **values: Any) -> Dict[str, Any]:
+    """Build a Better Auth OAuth token request without empty optional fields."""
+    payload = {
+        "grant_type": grant_type,
+        "client_id": OAUTH_CLIENT_ID,
+    }
+    if OAUTH_CLIENT_SECRET:
+        payload["client_secret"] = OAUTH_CLIENT_SECRET
+    for key, value in values.items():
+        if value is not None and value != "":
+            payload[key] = value
+    return payload
+
+
 # PKCE helpers
 def generate_code_verifier() -> str:
     """Generate a cryptographically random code verifier for PKCE."""
@@ -257,7 +306,7 @@ def build_sokosumi_auth_url(mcp_session_id: str) -> str:
         "response_type": "code",
         "client_id": OAUTH_CLIENT_ID,
         "redirect_uri": OAUTH_REDIRECT_URI,
-        "scope": "openid profile email",  # Sokosumi scopes
+        "scope": SOKOSUMI_OAUTH_SCOPE,
         "state": sokosumi_state,
         "code_challenge": sokosumi_code_challenge,
         "code_challenge_method": "S256",
@@ -286,15 +335,13 @@ async def exchange_sokosumi_code(code: str, state: str) -> Dict[str, Any]:
     async with httpx.AsyncClient() as client:
         response = await client.post(
             SOKOSUMI_TOKEN_ENDPOINT,
-            data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": OAUTH_REDIRECT_URI,
-                "client_id": OAUTH_CLIENT_ID,
-                "client_secret": OAUTH_CLIENT_SECRET,
-                "code_verifier": sokosumi_session["code_verifier"],
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            json=_sokosumi_token_request_payload(
+                "authorization_code",
+                code=code,
+                redirect_uri=OAUTH_REDIRECT_URI,
+                code_verifier=sokosumi_session["code_verifier"],
+            ),
+            headers={"Content-Type": "application/json"},
             timeout=30.0,
         )
 
@@ -303,13 +350,47 @@ async def exchange_sokosumi_code(code: str, state: str) -> Dict[str, Any]:
             raise ValueError(f"Token exchange failed: {response.text}")
 
         token_data = response.json()
+        if not token_data.get("access_token"):
+            logger.error(f"Sokosumi token exchange response missing access_token: {token_data}")
+            raise ValueError("Token exchange failed: missing access_token")
         logger.info("Successfully exchanged Sokosumi auth code for tokens")
 
         return {
             "access_token": token_data.get("access_token"),
             "refresh_token": token_data.get("refresh_token"),
+            "expires_in": token_data.get("expires_in"),
             "id_token": token_data.get("id_token"),
             "mcp_session_id": sokosumi_session["mcp_session_id"],
+        }
+
+
+async def refresh_sokosumi_access_token(refresh_token: str) -> Dict[str, Any]:
+    """Refresh the upstream Sokosumi OAuth access token."""
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            SOKOSUMI_TOKEN_ENDPOINT,
+            json=_sokosumi_token_request_payload(
+                "refresh_token",
+                refresh_token=refresh_token,
+            ),
+            headers={"Content-Type": "application/json"},
+            timeout=30.0,
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Sokosumi refresh failed: {response.status_code} - {response.text}")
+            raise ValueError(f"Sokosumi token refresh failed: {response.text}")
+
+        token_data = response.json()
+        if not token_data.get("access_token"):
+            logger.error(f"Sokosumi refresh response missing access_token: {token_data}")
+            raise ValueError("Sokosumi token refresh failed: missing access_token")
+        logger.info("Successfully refreshed Sokosumi access token")
+        return {
+            "access_token": token_data.get("access_token"),
+            "refresh_token": token_data.get("refresh_token") or refresh_token,
+            "expires_in": token_data.get("expires_in"),
+            "id_token": token_data.get("id_token"),
         }
 
 
@@ -317,7 +398,12 @@ async def exchange_sokosumi_code(code: str, state: str) -> Dict[str, Any]:
 # MCP Auth Code Generation (for mcp-remote)
 # ============================================================================
 
-def create_mcp_auth_code(mcp_session_id: str, sokosumi_access_token: str, user_id: str) -> str:
+def create_mcp_auth_code(
+    mcp_session_id: str,
+    sokosumi_access_token: str,
+    user_id: str,
+    sokosumi_refresh_token: Optional[str] = None,
+) -> str:
     """
     Create an MCP authorization code after successful Sokosumi authentication.
 
@@ -333,6 +419,7 @@ def create_mcp_auth_code(mcp_session_id: str, sokosumi_access_token: str, user_i
         **session,
         "user_id": user_id,
         "sokosumi_access_token": sokosumi_access_token,
+        "sokosumi_refresh_token": sokosumi_refresh_token,
         "code_created_at": time.time(),
     }
 
@@ -381,6 +468,7 @@ def exchange_code_for_tokens(
     refresh_token = _create_refresh_token(
         user_id=auth_data["user_id"],
         sokosumi_token=auth_data["sokosumi_access_token"],
+        sokosumi_refresh_token=auth_data.get("sokosumi_refresh_token"),
         scope=auth_data["scope"],
         client_id=client_id,
     )
@@ -396,7 +484,7 @@ def exchange_code_for_tokens(
     }
 
 
-def refresh_access_token(refresh_token: str) -> Dict[str, Any]:
+async def refresh_access_token(refresh_token: str) -> Dict[str, Any]:
     """Refresh an MCP access token."""
     token_data = _refresh_tokens.get(refresh_token)
     if not token_data:
@@ -406,9 +494,16 @@ def refresh_access_token(refresh_token: str) -> Dict[str, Any]:
         del _refresh_tokens[refresh_token]
         raise ValueError("Refresh token expired")
 
+    sokosumi_token = token_data["sokosumi_token"]
+    sokosumi_refresh_token = token_data.get("sokosumi_refresh_token")
+    if sokosumi_refresh_token:
+        upstream_tokens = await refresh_sokosumi_access_token(sokosumi_refresh_token)
+        sokosumi_token = upstream_tokens["access_token"]
+        sokosumi_refresh_token = upstream_tokens.get("refresh_token") or sokosumi_refresh_token
+
     access_token = _create_access_token(
         user_id=token_data["user_id"],
-        sokosumi_token=token_data["sokosumi_token"],
+        sokosumi_token=sokosumi_token,
         scope=token_data["scope"],
         client_id=token_data["client_id"],
     )
@@ -417,7 +512,8 @@ def refresh_access_token(refresh_token: str) -> Dict[str, Any]:
     del _refresh_tokens[refresh_token]
     new_refresh_token = _create_refresh_token(
         user_id=token_data["user_id"],
-        sokosumi_token=token_data["sokosumi_token"],
+        sokosumi_token=sokosumi_token,
+        sokosumi_refresh_token=sokosumi_refresh_token,
         scope=token_data["scope"],
         client_id=token_data["client_id"],
     )
@@ -467,6 +563,7 @@ def _create_access_token(
 def _create_refresh_token(
     user_id: str,
     sokosumi_token: str,
+    sokosumi_refresh_token: Optional[str],
     scope: str,
     client_id: str,
 ) -> str:
@@ -476,6 +573,7 @@ def _create_refresh_token(
     _refresh_tokens[token] = {
         "user_id": user_id,
         "sokosumi_token": sokosumi_token,
+        "sokosumi_refresh_token": sokosumi_refresh_token,
         "scope": scope,
         "client_id": client_id,
         "created_at": time.time(),

@@ -323,7 +323,7 @@ python test_client.py  # In another terminal
 The MCP server implements a hybrid OAuth architecture:
 
 **As OAuth Client (to Sokosumi)**:
-- Redirects users to Sokosumi's `/api/auth/oauth2/authorize`
+- Redirects users to Sokosumi's Better Auth `/auth/oauth2/authorize`
 - Exchanges Sokosumi auth codes for Sokosumi access tokens
 - Uses Sokosumi tokens for API calls
 
@@ -335,7 +335,7 @@ The MCP server implements a hybrid OAuth architecture:
 ### Authentication Middleware
 - **API Key**: Extracts from `?api_key=xxx` query param or `x-api-key` header
 - **OAuth Bearer**: Validates JWT from `Authorization: Bearer <jwt>` header
-- Automatically uses appropriate auth for Sokosumi API (Bearer or x-api-key)
+- Sends Sokosumi API requests with `Authorization: Bearer`, matching the CLI and OpenAPI spec
 - Returns 401 with `WWW-Authenticate` header if unauthenticated
 
 ### Environment Variables
@@ -343,15 +343,19 @@ The MCP server implements a hybrid OAuth architecture:
 |----------|-------------|---------|
 | `PORT` | HTTP port (triggers remote mode) | None (uses stdio) |
 | `MCP_SERVER_URL` | Public URL of the server | `https://mcp.sokosumi.com` |
-| `SOKOSUMI_OAUTH_BASE_URL` | Sokosumi OAuth base URL | `https://app.sokosumi.com` |
+| `SOKOSUMI_OAUTH_NETWORK` | OAuth provider network (`mainnet` or `preprod`) | `SOKOSUMI_NETWORK` or `mainnet` |
+| `SOKOSUMI_OAUTH_BASE_URL` | Better Auth OAuth root override | `https://api.sokosumi.com/auth` |
+| `SOKOSUMI_OAUTH_MAINNET_BASE_URL` | Mainnet Better Auth root | `https://api.sokosumi.com/auth` |
+| `SOKOSUMI_OAUTH_PREPROD_BASE_URL` | Preprod Better Auth root | `https://api.preprod.sokosumi.com/auth` |
+| `SOKOSUMI_OAUTH_SCOPE` | Upstream Sokosumi OAuth scopes | `openid offline_access` |
 | `OAUTH_CLIENT_ID` | OAuth client ID for Sokosumi | Required for OAuth |
 | `OAUTH_CLIENT_SECRET` | OAuth client secret for Sokosumi | Required for OAuth |
 | `OAUTH_PRIVATE_KEY` | PEM-encoded RSA private key | Auto-generated |
 | `OAUTH_KEY_ID` | Key ID for JWKS | Auto-generated |
 
 ### Sokosumi API Integration
-- Base URLs: `https://preprod.sokosumi.com/api` (preprod) or `https://app.sokosumi.com/api` (mainnet)
-- Authentication: Bearer token (OAuth) or x-api-key header (API key)
+- Base URLs: `https://api.preprod.sokosumi.com` (preprod) or `https://api.sokosumi.com` (mainnet)
+- Authentication: Bearer token for both OAuth tokens and API keys
 - All API calls use async httpx client with 30s timeout
 - Comprehensive error handling and logging
 

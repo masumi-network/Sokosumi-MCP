@@ -77,11 +77,13 @@ Uses ASGI middleware to extract credentials from URL parameters:
 
 ### Sokosumi API Integration
 Base URLs are network-dependent:
-- **Mainnet**: `https://app.sokosumi.com/api`
-- **Preprod**: `https://preprod.sokosumi.com/api`
+- **Mainnet API**: `https://api.sokosumi.com`
+- **Preprod API**: `https://api.preprod.sokosumi.com`
+- **Mainnet OAuth**: `https://api.sokosumi.com/auth`
+- **Preprod OAuth**: `https://api.preprod.sokosumi.com/auth`
 
 All API calls use async httpx with:
-- `x-api-key` header authentication
+- Bearer-token authentication
 - 30-second timeout
 - Comprehensive error handling and logging
 
