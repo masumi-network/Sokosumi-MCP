@@ -1,0 +1,89 @@
+#!/usr/bin/env sh
+set -eu
+
+scope="project"
+remove="0"
+force="0"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --project)
+      scope="project"
+      ;;
+    --user)
+      scope="user"
+      ;;
+    --remove|--unlink)
+      remove="1"
+      ;;
+    --force)
+      force="1"
+      ;;
+    -h|--help)
+      cat <<'EOF'
+Usage: sokosumi-plugin-link-shortcuts [--project|--user] [--remove] [--force]
+
+Creates optional bare Claude Code slash-command symlinks for the Sokosumi plugin.
+
+  --project  write aliases to ./.claude/commands (default)
+  --user     write aliases to ~/.claude/commands
+  --remove   remove symlinks created by this helper
+  --force    replace existing symlinks; regular files are still preserved
+EOF
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+plugin_root=${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$script_dir/.." && pwd)}
+source_dir="$plugin_root/commands"
+
+if [ "$scope" = "user" ]; then
+  target_dir="$HOME/.claude/commands"
+else
+  target_dir=".claude/commands"
+fi
+
+commands="sokosumi hannah elena research reseach market agents jobs tasks"
+
+mkdir -p "$target_dir"
+
+for name in $commands; do
+  src="$source_dir/$name.md"
+  dest="$target_dir/$name.md"
+
+  if [ ! -f "$src" ]; then
+    echo "skip $name: source command not found at $src" >&2
+    continue
+  fi
+
+  if [ "$remove" = "1" ]; then
+    if [ -L "$dest" ]; then
+      rm "$dest"
+      echo "removed $dest"
+    else
+      echo "skip $dest: not a symlink"
+    fi
+    continue
+  fi
+
+  if [ -e "$dest" ] || [ -L "$dest" ]; then
+    if [ -L "$dest" ] && [ "$force" = "1" ]; then
+      rm "$dest"
+    else
+      echo "skip $dest: already exists"
+      continue
+    fi
+  fi
+
+  ln -s "$src" "$dest"
+  echo "linked $dest -> $src"
+done
+
+echo "Done. Run /reload-plugins or restart Claude Code if the aliases do not appear."
