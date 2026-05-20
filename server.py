@@ -205,13 +205,28 @@ def get_base_url(network: Optional[str] = None) -> str:
     Returns:
         The base URL for the API
     """
+    explicit_base_url = os.environ.get("SOKOSUMI_API_BASE_URL")
+    if explicit_base_url:
+        return explicit_base_url.rstrip("/")
+
     if network is None:
-        network = current_network.get() or networks.get('current', 'mainnet')
+        network = (
+            current_network.get()
+            or networks.get('current')
+            or os.environ.get("SOKOSUMI_NETWORK")
+            or 'mainnet'
+        )
 
     if network == 'preprod':
-        return 'https://preprod.sokosumi.com/api'
+        return os.environ.get(
+            "SOKOSUMI_PREPROD_API_BASE_URL",
+            "https://api.preprod.sokosumi.com",
+        ).rstrip("/")
     else:
-        return 'https://app.sokosumi.com/api'
+        return os.environ.get(
+            "SOKOSUMI_MAINNET_API_BASE_URL",
+            "https://api.sokosumi.com",
+        ).rstrip("/")
 
 # Helper function to get API key/token
 def get_current_api_key() -> Optional[str]:
@@ -221,29 +236,164 @@ def get_current_api_key() -> Optional[str]:
     Returns:
         The API key/token or None if not found
     """
-    return current_api_key.get() or api_keys.get('current')
+    return (
+        current_api_key.get()
+        or api_keys.get('current')
+        or os.environ.get("SOKOSUMI_API_KEY")
+        or os.environ.get("SOKOSUMI_AUTH_TOKEN")
+        or os.environ.get("API_KEY")
+    )
 
 
 def get_auth_headers() -> Dict[str, str]:
     """
     Get authentication headers for Sokosumi API calls.
 
-    Returns headers with either:
-    - x-api-key: for direct API key authentication
-    - Authorization: Bearer for OAuth tokens
-
-    The Sokosumi API accepts both formats.
+    Returns headers using Bearer authentication. Sokosumi CLI uses the same
+    header for user API keys, user OAuth tokens, and coworker bearer tokens.
     """
     token = get_current_api_key()
     if not token:
         return {}
 
-    # If it looks like a JWT or OAuth token (contains dots), use Bearer
-    # Otherwise, use x-api-key header
-    if '.' in token or token.startswith('eyJ'):
-        return {"Authorization": f"Bearer {token}"}
-    else:
-        return {"x-api-key": token}
+    return {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+
+def auth_error() -> Dict[str, Any]:
+    """Return a consistent authentication error for MCP tools."""
+    return {
+        "error": "No Sokosumi authentication found",
+        "details": (
+            "Connect the Sokosumi MCP server with OAuth, pass ?api_key=... "
+            "for local HTTP development, or set SOKOSUMI_API_KEY for stdio."
+        ),
+    }
+
+
+async def sokosumi_api_request(
+    method: str,
+    path: str,
+    *,
+    params: Optional[Dict[str, Any]] = None,
+    json_body: Optional[Dict[str, Any]] = None,
+    timeout: float = 30.0,
+) -> Dict[str, Any]:
+    """Call the Sokosumi API and return a JSON-compatible response."""
+    api_key = get_current_api_key()
+    if not api_key:
+        return auth_error()
+
+    base_url = get_base_url()
+    url = f"{base_url}/{path.lstrip('/')}"
+
+    clean_params = {
+        key: value
+        for key, value in (params or {}).items()
+        if value is not None and value != "" and value != []
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.request(
+                method.upper(),
+                url,
+                params=clean_params or None,
+                json=json_body,
+                headers=get_auth_headers(),
+                timeout=timeout,
+            )
+
+        if 200 <= response.status_code < 300:
+            if not response.text:
+                return {"data": None}
+            try:
+                return response.json()
+            except Exception:
+                return {"data": response.text}
+
+        logger.error(
+            "Sokosumi API request failed: %s %s -> %s - %s",
+            method.upper(),
+            url,
+            response.status_code,
+            response.text,
+        )
+        return {
+            "error": f"Sokosumi API request failed: {response.status_code}",
+            "details": response.text,
+            "path": path,
+        }
+    except Exception as e:
+        logger.error("Sokosumi API request error: %s %s - %s", method, url, e)
+        return {
+            "error": "Failed to connect to Sokosumi API",
+            "details": str(e),
+            "path": path,
+        }
+
+
+def _data_items(response: Dict[str, Any]) -> list:
+    """Extract list data from a Sokosumi API envelope."""
+    data = response.get("data") if isinstance(response, dict) else None
+    return data if isinstance(data, list) else []
+
+
+async def resolve_coworker(reference: str, scope: str = "whitelisted") -> Optional[Dict[str, Any]]:
+    """Resolve a coworker by id, slug, or name."""
+    if not reference:
+        return None
+
+    needle = reference.strip().lower()
+    if not needle:
+        return None
+
+    if needle.startswith("cow_"):
+        response = await sokosumi_api_request("GET", f"/v1/coworkers/{reference.strip()}")
+        data = response.get("data") if isinstance(response, dict) else None
+        return data if isinstance(data, dict) else None
+
+    for candidate_scope in [scope, "all"]:
+        response = await sokosumi_api_request(
+            "GET",
+            "/v1/coworkers",
+            params={"scope": candidate_scope},
+        )
+        if response.get("error"):
+            continue
+
+        coworkers = _data_items(response)
+        exact = next(
+            (
+                coworker
+                for coworker in coworkers
+                if needle
+                in {
+                    str(coworker.get("id", "")).lower(),
+                    str(coworker.get("slug", "")).lower(),
+                    str(coworker.get("name", "")).lower(),
+                }
+            ),
+            None,
+        )
+        if exact:
+            return exact
+
+        partial = next(
+            (
+                coworker
+                for coworker in coworkers
+                if needle in str(coworker.get("name", "")).lower()
+                or needle in str(coworker.get("slug", "")).lower()
+            ),
+            None,
+        )
+        if partial:
+            return partial
+
+    return None
 
 
 def get_current_user() -> Optional[Dict[str, Any]]:
@@ -444,6 +594,31 @@ async def get_agent_input_schema(agent_id: str) -> Dict[str, Any]:
             "details": str(e)
         }
 
+
+@mcp.tool()
+async def get_agent(agent_id: str) -> Dict[str, Any]:
+    """
+    Gets details for a specific Sokosumi agent.
+
+    Args:
+        agent_id: The ID of the agent to retrieve.
+
+    Returns:
+        Agent details including name, description, pricing, status, tags, and metadata.
+    """
+    return await sokosumi_api_request("GET", f"/v1/agents/{agent_id}")
+
+
+@mcp.tool()
+async def list_categories() -> Dict[str, Any]:
+    """
+    Lists Sokosumi marketplace categories.
+
+    Returns:
+        Categories that can help narrow agent discovery.
+    """
+    return await sokosumi_api_request("GET", "/v1/categories")
+
 @mcp.tool()
 async def create_job(
     agent_id: str,
@@ -467,45 +642,30 @@ async def create_job(
     if not api_key:
         return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
 
-    base_url = get_base_url()
-    url = f"{base_url}/v1/agents/{agent_id}/jobs"
+    schema_response = await sokosumi_api_request(
+        "GET",
+        f"/v1/agents/{agent_id}/input-schema",
+    )
+    if schema_response.get("error"):
+        return schema_response
 
-    # Prepare request body
-    # Always request sharing within organization when creating (server may ignore if unsupported)
+    input_schema = schema_response.get("data") or {}
     body = {
-        "maxAcceptedCredits": max_accepted_credits,
-        "shareOrganization": True,
+        "inputSchema": input_schema,
+        "inputData": input_data or {},
+        "maxCredits": max_accepted_credits,
     }
-    if input_data is not None:
-        body["inputData"] = input_data
     if name is not None:
         body["name"] = name
 
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                json=body,
-                headers=get_auth_headers(),
-                timeout=30.0
-            )
-
-            if response.status_code in [200, 201]:
-                data = response.json()
-                logger.info(f"Successfully created job {data.get('data', {}).get('id')} for agent {agent_id}")
-                return data
-            else:
-                logger.error(f"Failed to create job: {response.status_code} - {response.text}")
-                return {
-                    "error": f"Failed to create job: {response.status_code}",
-                    "details": response.text
-                }
-    except Exception as e:
-        logger.error(f"Error creating job: {str(e)}")
-        return {
-            "error": "Failed to connect to Sokosumi API",
-            "details": str(e)
-        }
+    data = await sokosumi_api_request(
+        "POST",
+        f"/v1/agents/{agent_id}/jobs",
+        json_body=body,
+    )
+    if not data.get("error"):
+        logger.info(f"Successfully created job for agent {agent_id}")
+    return data
 
 @mcp.tool()
 async def get_job(job_id: str) -> Dict[str, Any]:
@@ -644,6 +804,417 @@ async def get_user_profile() -> Dict[str, Any]:
             "error": "Failed to connect to Sokosumi API",
             "details": str(e)
         }
+
+
+@mcp.tool()
+async def list_coworkers(
+    scope: str = "whitelisted",
+    capability: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Lists Sokosumi coworkers for multi-agent task workflows.
+
+    Args:
+        scope: Coworker visibility scope: whitelisted, all, or archived.
+        capability: Optional capability filter such as chat or tasks.
+        search: Optional local search across coworker id, slug, name, company, caption, and description.
+        limit: Optional maximum number of coworkers to return.
+
+    Returns:
+        A Sokosumi API response containing coworker records.
+    """
+    if scope not in ["whitelisted", "all", "archived"]:
+        return {"error": "Invalid scope", "details": "Use whitelisted, all, or archived"}
+
+    response = await sokosumi_api_request(
+        "GET",
+        "/v1/coworkers",
+        params={"scope": scope, "capability": capability},
+    )
+    if response.get("error"):
+        return response
+
+    coworkers = _data_items(response)
+    if search:
+        needle = search.strip().lower()
+        coworkers = [
+            coworker
+            for coworker in coworkers
+            if needle
+            in " ".join(
+                str(coworker.get(field, "") or "")
+                for field in ["id", "slug", "name", "company", "caption", "description"]
+            ).lower()
+        ]
+
+    if limit is not None and limit > 0:
+        coworkers = coworkers[:limit]
+
+    return {**response, "data": coworkers}
+
+
+@mcp.tool()
+async def get_coworker(coworker: str) -> Dict[str, Any]:
+    """
+    Gets a coworker by id, slug, or name.
+
+    Args:
+        coworker: Coworker id, slug, or name, for example "hannah" or "elena".
+
+    Returns:
+        A Sokosumi API response containing the resolved coworker.
+    """
+    resolved = await resolve_coworker(coworker)
+    if not resolved:
+        return {
+            "error": "Coworker not found",
+            "details": f"No coworker matched {coworker!r}",
+        }
+    return {"data": resolved}
+
+
+@mcp.tool()
+async def create_coworker_task(
+    coworker: str,
+    description: str,
+    name: Optional[str] = None,
+    status: str = "READY",
+) -> Dict[str, Any]:
+    """
+    Creates a Sokosumi task assigned to a coworker such as Hannah or Elena.
+
+    Args:
+        coworker: Coworker id, slug, or name.
+        description: The work brief for the coworker.
+        name: Optional task name. If omitted, a short name is derived from the description.
+        status: DRAFT to stage the task, or READY to start it immediately.
+
+    Returns:
+        The created task response.
+    """
+    if status not in ["DRAFT", "READY"]:
+        return {"error": "Invalid status", "details": "Use DRAFT or READY"}
+    if not description or not description.strip():
+        return {"error": "description is required"}
+
+    resolved = await resolve_coworker(coworker)
+    if not resolved:
+        return {
+            "error": "Coworker not found",
+            "details": f"No coworker matched {coworker!r}",
+        }
+
+    task_name = name or description.strip().splitlines()[0][:120] or "New Task"
+    body = {
+        "name": task_name,
+        "description": description,
+        "coworkerId": resolved.get("id"),
+        "status": status,
+        "origin": "SOKOSUMI",
+    }
+    return await sokosumi_api_request("POST", "/v1/tasks", json_body=body)
+
+
+@mcp.tool()
+async def list_tasks(
+    q: Optional[str] = None,
+    status: Optional[str] = None,
+    scope: str = "owned",
+    coworker: Optional[str] = None,
+    coworker_id: Optional[str] = None,
+    limit: int = 20,
+    cursor: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Lists Sokosumi tasks in the active workspace.
+
+    Args:
+        q: Optional case-insensitive task name search.
+        status: Optional comma-separated status filter, for example READY,RUNNING.
+        scope: owned or workspace.
+        coworker: Optional coworker id, slug, or name to resolve as a filter.
+        coworker_id: Optional coworker id filter.
+        limit: Number of tasks to return.
+        cursor: Optional pagination cursor.
+
+    Returns:
+        A paginated Sokosumi API task list response.
+    """
+    if scope not in ["owned", "workspace"]:
+        return {"error": "Invalid scope", "details": "Use owned or workspace"}
+
+    resolved_coworker_id = coworker_id
+    if coworker and not coworker_id:
+        resolved = await resolve_coworker(coworker)
+        if not resolved:
+            return {
+                "error": "Coworker not found",
+                "details": f"No coworker matched {coworker!r}",
+            }
+        resolved_coworker_id = resolved.get("id")
+
+    return await sokosumi_api_request(
+        "GET",
+        "/v1/tasks",
+        params={
+            "q": q,
+            "status": status,
+            "scope": scope,
+            "coworkerId": resolved_coworker_id,
+            "limit": limit,
+            "cursor": cursor,
+        },
+    )
+
+
+@mcp.tool()
+async def get_task(task_id: str) -> Dict[str, Any]:
+    """
+    Retrieves details for a Sokosumi task.
+
+    Args:
+        task_id: The task id.
+
+    Returns:
+        A task detail response.
+    """
+    return await sokosumi_api_request("GET", f"/v1/tasks/{task_id}")
+
+
+@mcp.tool()
+async def list_task_events(task_id: str) -> Dict[str, Any]:
+    """
+    Lists activity events for a Sokosumi task.
+
+    Args:
+        task_id: The task id.
+
+    Returns:
+        A task events response.
+    """
+    return await sokosumi_api_request("GET", f"/v1/tasks/{task_id}/events")
+
+
+@mcp.tool()
+async def create_task_event(
+    task_id: str,
+    comment: Optional[str] = None,
+    status: Optional[str] = None,
+    credits: Optional[float] = None,
+    authentication_url: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Adds a task comment or status event.
+
+    Args:
+        task_id: The task id.
+        comment: Optional task comment.
+        status: Optional task status update.
+        credits: Optional credits for spendable completion/cancel events.
+        authentication_url: Required when setting AUTHENTICATION_REQUIRED.
+
+    Returns:
+        The created task event response.
+    """
+    body: Dict[str, Any] = {"origin": "SOKOSUMI"}
+    if comment is not None:
+        body["comment"] = comment
+    if status is not None:
+        body["status"] = status
+    if credits is not None:
+        body["credits"] = credits
+    if authentication_url is not None:
+        body["authenticationUrl"] = authentication_url
+
+    if "comment" not in body and "status" not in body:
+        return {"error": "comment or status is required"}
+
+    return await sokosumi_api_request(
+        "POST",
+        f"/v1/tasks/{task_id}/events",
+        json_body=body,
+    )
+
+
+@mcp.tool()
+async def list_task_jobs(task_id: str) -> Dict[str, Any]:
+    """
+    Lists agent jobs attached to a Sokosumi task.
+
+    Args:
+        task_id: The task id.
+
+    Returns:
+        The task jobs response.
+    """
+    return await sokosumi_api_request("GET", f"/v1/tasks/{task_id}/jobs")
+
+
+@mcp.tool()
+async def add_job_to_task(
+    task_id: str,
+    agent_id: str,
+    max_accepted_credits: float,
+    input_data: Optional[Dict[str, Any]] = None,
+    name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Adds an agent job to an existing task.
+
+    This endpoint is primarily for coworker bearer-token execution. If a normal
+    user token is connected, the API may reject the request.
+
+    Args:
+        task_id: The task id.
+        agent_id: The agent id.
+        max_accepted_credits: Maximum credits to spend.
+        input_data: Input data matching the agent input schema.
+        name: Optional job name.
+
+    Returns:
+        The created job response.
+    """
+    schema_response = await sokosumi_api_request(
+        "GET",
+        f"/v1/agents/{agent_id}/input-schema",
+    )
+    if schema_response.get("error"):
+        return schema_response
+
+    body = {
+        "agentId": agent_id,
+        "inputSchema": schema_response.get("data") or {},
+        "inputData": input_data or {},
+        "maxCredits": max_accepted_credits,
+    }
+    if name is not None:
+        body["name"] = name
+
+    return await sokosumi_api_request(
+        "POST",
+        f"/v1/tasks/{task_id}/jobs",
+        json_body=body,
+    )
+
+
+@mcp.tool()
+async def list_jobs(
+    agent_id: Optional[str] = None,
+    status: Optional[str] = None,
+    scope: str = "owned",
+    limit: int = 20,
+    cursor: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Lists direct Sokosumi jobs in the active workspace.
+
+    Args:
+        agent_id: Optional agent id filter.
+        status: Optional job status filter.
+        scope: owned or workspace.
+        limit: Number of jobs to return.
+        cursor: Optional pagination cursor.
+
+    Returns:
+        A paginated jobs response.
+    """
+    if scope not in ["owned", "workspace"]:
+        return {"error": "Invalid scope", "details": "Use owned or workspace"}
+
+    return await sokosumi_api_request(
+        "GET",
+        "/v1/jobs",
+        params={
+            "agentId": agent_id,
+            "status": status,
+            "scope": scope,
+            "limit": limit,
+            "cursor": cursor,
+        },
+    )
+
+
+@mcp.tool()
+async def list_job_events(job_id: str) -> Dict[str, Any]:
+    """
+    Lists lifecycle events for a Sokosumi job.
+
+    Args:
+        job_id: The job id.
+
+    Returns:
+        A job events response.
+    """
+    return await sokosumi_api_request("GET", f"/v1/jobs/{job_id}/events")
+
+
+@mcp.tool()
+async def list_job_files(job_id: str) -> Dict[str, Any]:
+    """
+    Lists file outputs for a Sokosumi job.
+
+    Args:
+        job_id: The job id.
+
+    Returns:
+        A job files response.
+    """
+    return await sokosumi_api_request("GET", f"/v1/jobs/{job_id}/files")
+
+
+@mcp.tool()
+async def list_job_links(job_id: str) -> Dict[str, Any]:
+    """
+    Lists link outputs for a Sokosumi job.
+
+    Args:
+        job_id: The job id.
+
+    Returns:
+        A job links response.
+    """
+    return await sokosumi_api_request("GET", f"/v1/jobs/{job_id}/links")
+
+
+@mcp.tool()
+async def get_job_input_request(job_id: str) -> Dict[str, Any]:
+    """
+    Checks whether a Sokosumi job is waiting for more user input.
+
+    Args:
+        job_id: The job id.
+
+    Returns:
+        The pending input request, if any.
+    """
+    return await sokosumi_api_request("GET", f"/v1/jobs/{job_id}/input-request")
+
+
+@mcp.tool()
+async def provide_job_input(
+    job_id: str,
+    event_id: str,
+    input_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Provides requested input to a Sokosumi job that is awaiting input.
+
+    Args:
+        job_id: The job id.
+        event_id: The awaiting-input event id.
+        input_data: Input data matching the requested input schema.
+
+    Returns:
+        The created job input response.
+    """
+    return await sokosumi_api_request(
+        "POST",
+        f"/v1/jobs/{job_id}/inputs",
+        json_body={"eventId": event_id, "inputData": input_data},
+    )
+
 
 # ChatGPT Compatibility Tools
 # These tools are required for ChatGPT Connectors and deep research functionality
