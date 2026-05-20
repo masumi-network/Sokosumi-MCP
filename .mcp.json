@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "sokosumi": {
+      "type": "http",
+      "url": "https://mcp.sokosumi.com/mcp",
+      "oauth": {
+        "clientId": "sokosumi-claude-code-plugin"
+      }
+    }
+  }
+}
