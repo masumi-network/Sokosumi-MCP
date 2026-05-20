@@ -197,23 +197,95 @@ Replace `/absolute/path/to/Sokosumi-MCP/server.py` with your actual path and res
 
 **Note:** This method is only for local development. For production use, we recommend Method 1 (MCP Link Generation) above.
 
+## Method 3: Claude Code Plugin
+
+This repository also ships a Claude Code plugin named `sokosumi`. The plugin registers the hosted Sokosumi MCP server and adds command skills for agents, coworkers, tasks, jobs, Hannah, Elena, research, and market workflows.
+
+### Install from this repository as a marketplace
+
+After this repository is published, add it as a marketplace and install the plugin:
+
+```shell
+/plugin marketplace add masumi-network/Sokosumi-MCP
+/plugin install sokosumi@sokosumi
+/reload-plugins
+```
+
+Claude Code plugin commands are namespaced by plugin name. Use:
+
+```shell
+/sokosumi:hannah Research our competitors and compare us to them.
+/sokosumi:elena Show me my open tasks and what needs attention.
+/sokosumi:research Find a research agent for this brief...
+/sokosumi:market Build a market analysis plan for this product.
+```
+
+To create optional bare project aliases such as `/hannah`, `/elena`, `/research`, and `/market`, run:
+
+```shell
+/sokosumi:install-shortcuts
+```
+
+That command uses `sokosumi-plugin-link-shortcuts --project` to create symlinks in `.claude/commands`. Use these aliases only where you want project-local standalone commands; plugin commands remain available as `/sokosumi:*`.
+
+### Local plugin development
+
+For local plugin development from this checkout:
+
+```bash
+claude --plugin-dir .
+```
+
+Then, inside Claude Code:
+
+```shell
+/reload-plugins
+/mcp
+```
+
+Select the `sokosumi` MCP server and complete the OAuth flow if Claude Code asks you to authenticate. Once connected, ask Claude to list agents, inspect an agent input schema, create a job, or check a job result.
+
+The plugin uses `https://mcp.sokosumi.com/mcp`. For local MCP endpoint testing, temporarily edit `.mcp.json` or add a separate local MCP server in Claude Code.
+
+Do not commit API keys or OAuth tokens. Use the hosted OAuth flow for normal usage and local MCP overrides only during local development.
+
 ## Environment Variables
 
 | Variable | Required | Description | Default |
 |----------|----------|-------------|---------|
-| `SOKOSUMI_API_KEY` | Yes | Your Sokosumi API key | None |
+| `SOKOSUMI_API_KEY` | Local stdio only | Your Sokosumi API key | None |
 | `SOKOSUMI_NETWORK` | No | Network selection (mainnet or preprod) | `mainnet` |
+| `SOKOSUMI_API_BASE_URL` | No | Override the Sokosumi API base URL | None |
+| `SOKOSUMI_MAINNET_API_BASE_URL` | No | Mainnet API base URL | `https://api.sokosumi.com` |
+| `SOKOSUMI_PREPROD_API_BASE_URL` | No | Preprod API base URL | `https://api.preprod.sokosumi.com` |
 
 ## Available Tools
 
 | Tool | Description |
 |------|-------------|
 | `list_agents()` | List all available AI agents with pricing |
+| `get_agent(agent_id)` | Get details for one agent |
 | `get_agent_input_schema(agent_id)` | Get input parameters for an agent |
 | `create_job(agent_id, max_accepted_credits, input_data, name)` | Submit a job to an agent |
 | `get_job(job_id)` | Get job status and results |
 | `list_agent_jobs(agent_id)` | List jobs for a specific agent |
 | `get_user_profile()` | Get your account information |
+| `list_categories()` | List marketplace categories |
+| `list_coworkers(scope, capability, search, limit)` | List available coworkers |
+| `get_coworker(coworker)` | Resolve a coworker by id, slug, or name |
+| `create_coworker_task(coworker, description, name, status)` | Create a coworker task, for example for Hannah or Elena |
+| `list_tasks(q, status, scope, coworker, coworker_id, limit, cursor)` | List tasks |
+| `get_task(task_id)` | Get task details |
+| `list_task_events(task_id)` | List task activity |
+| `create_task_event(task_id, comment, status, credits, authentication_url)` | Add a task comment or status event |
+| `list_task_jobs(task_id)` | List jobs attached to a task |
+| `add_job_to_task(task_id, agent_id, max_accepted_credits, input_data, name)` | Add an agent job to a task, primarily for coworker tokens |
+| `list_jobs(agent_id, status, scope, limit, cursor)` | List direct jobs |
+| `list_job_events(job_id)` | List job lifecycle events |
+| `list_job_files(job_id)` | List job file outputs |
+| `list_job_links(job_id)` | List job link outputs |
+| `get_job_input_request(job_id)` | Check whether a job needs more input |
+| `provide_job_input(job_id, event_id, input_data)` | Submit requested job input |
 
 
 ## Troubleshooting
