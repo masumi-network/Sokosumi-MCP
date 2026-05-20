@@ -1,7 +1,7 @@
 {
   "name": "sokosumi",
   "displayName": "Sokosumi MCP",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Claude Code plugin for Sokosumi agents, coworkers, tasks, jobs, and marketplace workflows.",
   "author": {
     "name": "Masumi Network",

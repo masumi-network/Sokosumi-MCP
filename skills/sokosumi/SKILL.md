@@ -8,9 +8,9 @@ Use this skill when the user wants to work with Sokosumi agents, jobs, marketpla
 
 The plugin provides a `sokosumi` MCP server. Prefer the MCP tools over manual HTTP calls or browser work.
 
-## Plugin Commands
+## Plugin Skills
 
-After installation, commands are namespaced:
+After installation, plugin skills are namespaced:
 
 - `/sokosumi:hannah`: create or inspect Hannah coworker tasks.
 - `/sokosumi:elena`: create or inspect Elena coworker tasks.
@@ -21,7 +21,7 @@ After installation, commands are namespaced:
 - `/sokosumi:tasks`: check coworker tasks and task events.
 - `/sokosumi:install-shortcuts`: create optional bare aliases such as `/hannah`.
 
-Claude Code namespaces plugin commands by design. Bare commands like `/hannah` require standalone aliases in `.claude/commands`; use `sokosumi-plugin-link-shortcuts --project` only after the user asks for them.
+Claude Code namespaces plugin skills by design. Bare skills like `/hannah` require standalone aliases in `.claude/skills`; use `sokosumi-plugin-link-shortcuts --project` only after the user asks for them.
 
 ## MCP Tools
 

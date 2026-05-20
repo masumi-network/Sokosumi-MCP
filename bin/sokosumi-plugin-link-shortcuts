@@ -23,10 +23,10 @@ while [ "$#" -gt 0 ]; do
       cat <<'EOF'
 Usage: sokosumi-plugin-link-shortcuts [--project|--user] [--remove] [--force]
 
-Creates optional bare Claude Code slash-command symlinks for the Sokosumi plugin.
+Creates optional bare Claude Code skill symlinks for the Sokosumi plugin.
 
-  --project  write aliases to ./.claude/commands (default)
-  --user     write aliases to ~/.claude/commands
+  --project  write aliases to ./.claude/skills (default)
+  --user     write aliases to ~/.claude/skills
   --remove   remove symlinks created by this helper
   --force    replace existing symlinks; regular files are still preserved
 EOF
@@ -42,24 +42,24 @@ done
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 plugin_root=${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$script_dir/.." && pwd)}
-source_dir="$plugin_root/commands"
+source_dir="$plugin_root/skills"
 
 if [ "$scope" = "user" ]; then
-  target_dir="$HOME/.claude/commands"
+  target_dir="$HOME/.claude/skills"
 else
-  target_dir=".claude/commands"
+  target_dir=".claude/skills"
 fi
 
-commands="sokosumi hannah elena research reseach market agents jobs tasks"
+skills="sokosumi hannah elena research reseach market agents jobs tasks"
 
 mkdir -p "$target_dir"
 
-for name in $commands; do
-  src="$source_dir/$name.md"
-  dest="$target_dir/$name.md"
+for name in $skills; do
+  src="$source_dir/$name"
+  dest="$target_dir/$name"
 
-  if [ ! -f "$src" ]; then
-    echo "skip $name: source command not found at $src" >&2
+  if [ ! -d "$src" ]; then
+    echo "skip $name: source skill not found at $src" >&2
     continue
   fi
 

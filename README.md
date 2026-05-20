@@ -199,7 +199,7 @@ Replace `/absolute/path/to/Sokosumi-MCP/server.py` with your actual path and res
 
 ## Method 3: Claude Code Plugin
 
-This repository also ships a Claude Code plugin named `sokosumi`. The plugin registers the hosted Sokosumi MCP server and adds command skills for agents, coworkers, tasks, jobs, Hannah, Elena, research, and market workflows.
+This repository also ships a Claude Code plugin named `sokosumi`. The plugin registers the hosted Sokosumi MCP server and adds slash skills for agents, coworkers, tasks, jobs, Hannah, Elena, research, and market workflows.
 
 ### Install from this repository as a marketplace
 
@@ -211,7 +211,7 @@ After this repository is published, add it as a marketplace and install the plug
 /reload-plugins
 ```
 
-Claude Code plugin commands are namespaced by plugin name. Use:
+Claude Code plugin skills are namespaced by plugin name. Use:
 
 ```shell
 /sokosumi:hannah Research our competitors and compare us to them.
@@ -226,7 +226,7 @@ To create optional bare project aliases such as `/hannah`, `/elena`, `/research`
 /sokosumi:install-shortcuts
 ```
 
-That command uses `sokosumi-plugin-link-shortcuts --project` to create symlinks in `.claude/commands`. Use these aliases only where you want project-local standalone commands; plugin commands remain available as `/sokosumi:*`.
+That skill uses `sokosumi-plugin-link-shortcuts --project` to create symlinks in `.claude/skills`. Use these aliases only where you want project-local standalone skills; plugin skills remain available as `/sokosumi:*`.
 
 ### Local plugin development
 
