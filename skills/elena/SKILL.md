@@ -15,4 +15,5 @@ Workflow:
 3. If the user asks for status, open work, or what needs attention, use `list_tasks(coworker="elena")`, then `get_task`, `list_task_events`, and `list_task_jobs` for relevant tasks.
 4. Otherwise resolve Elena with `get_coworker(coworker="elena")`.
 5. Create a READY task with `create_coworker_task(coworker="elena", description=<brief>, name=<short title>, status="READY")`.
-6. Return the task id, coworker, status, and next monitoring step.
+6. If the task was created with status READY, immediately start background monitoring: invoke the `sokosumi:watch` skill with the new task id. Do not wait for the task to finish.
+7. Return the task id, coworker, status, and tell the user it is now being watched in the background and you will report back when it is done.

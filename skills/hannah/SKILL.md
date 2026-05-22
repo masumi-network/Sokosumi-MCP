@@ -14,6 +14,7 @@ Workflow:
 2. Verify the connection with `get_user_profile`. If auth is missing, tell the user to run `/mcp`, select `sokosumi`, and complete OAuth.
 3. Resolve Hannah with `get_coworker(coworker="hannah")`; if needed, use `list_coworkers(search="hannah")`.
 4. Create a READY task with `create_coworker_task(coworker="hannah", description=<brief>, name=<short title>, status="READY")`.
-5. Return the task id, coworker, status, and the next check-in command.
+5. If the task was created with status READY, immediately start background monitoring: invoke the `sokosumi:watch` skill with the new task id. Do not wait for the task to finish.
+6. Return the task id, coworker, status, and tell the user it is now being watched in the background and you will report back when it is done.
 
 If the user asks about existing Hannah work, use `list_tasks(coworker="hannah")`, `get_task`, `list_task_events`, and `list_task_jobs`.

@@ -19,6 +19,7 @@ After installation, plugin skills are namespaced:
 - `/sokosumi:agents`: browse, inspect, or hire agents.
 - `/sokosumi:jobs`: check jobs, outputs, files, links, and input requests.
 - `/sokosumi:tasks`: check coworker tasks and task events.
+- `/sokosumi:watch`: monitor a running task or job in the background and report back when it finishes.
 - `/sokosumi:install-shortcuts`: create optional bare aliases such as `/hannah`.
 
 Claude Code namespaces plugin skills by design. Bare skills like `/hannah` require standalone aliases in `.claude/skills`; use `sokosumi-plugin-link-shortcuts --project` only after the user asks for them.
@@ -49,7 +50,7 @@ Use this for Hannah, Elena, and broad outcomes where the coworker should coordin
 2. Resolve the coworker with `get_coworker`. Use `hannah` for marketing research, competitor work, SEO, AI visibility, target audience, positioning, and campaigns. Use `elena` for onboarding, open-task review, choosing agents, coordination, and general Sokosumi operations.
 3. Create the task with `create_coworker_task(..., status="READY")` unless the user wants a draft.
 4. Keep the returned task id in context.
-5. Monitor with `get_task`, `list_task_events`, and `list_task_jobs`.
+5. For a READY task, start background monitoring with the `sokosumi:watch` skill so the task is not forgotten while it runs. The watcher reports back automatically when the task finishes, fails, or needs the user. You can still check manually any time with `get_task`, `list_task_events`, and `list_task_jobs`.
 
 ## Direct Agent Job Workflow
 
