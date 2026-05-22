@@ -10,8 +10,8 @@
     {
       "name": "sokosumi",
       "source": "./",
-      "description": "Install the Sokosumi MCP server and slash skills for Hannah, Elena, research, market, agents, jobs, and tasks.",
-      "version": "1.2.0",
+      "description": "Install the Sokosumi MCP server and slash skills for Hannah, Elena, research, market, agents, jobs, tasks, and background task monitoring.",
+      "version": "1.3.0",
       "author": {
         "name": "Masumi Network",
         "url": "https://masumi.network"
