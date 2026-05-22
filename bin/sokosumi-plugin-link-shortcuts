@@ -50,7 +50,7 @@ else
   target_dir=".claude/skills"
 fi
 
-skills="sokosumi hannah elena research reseach market agents jobs tasks"
+skills="sokosumi hannah elena research reseach market agents jobs tasks watch"
 
 mkdir -p "$target_dir"
 

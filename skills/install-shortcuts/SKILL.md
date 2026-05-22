@@ -1,10 +1,10 @@
 ---
-description: Install optional bare Sokosumi skill aliases such as /hannah, /elena, /research, /market, /agents, /jobs, and /tasks.
+description: Install optional bare Sokosumi skill aliases such as /hannah, /elena, /research, /market, /agents, /jobs, /tasks, and /watch.
 ---
 
 # Install Sokosumi Shortcuts
 
-This skill creates optional standalone skill symlinks in `.claude/skills` so users can invoke `/hannah`, `/elena`, `/research`, `/market`, `/agents`, `/jobs`, and `/tasks` without the plugin namespace.
+This skill creates optional standalone skill symlinks in `.claude/skills` so users can invoke `/hannah`, `/elena`, `/research`, `/market`, `/agents`, `/jobs`, `/tasks`, and `/watch` without the plugin namespace.
 
 Ask for confirmation before running the helper because it writes files in the current project. Then run:
 
