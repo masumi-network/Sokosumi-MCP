@@ -199,7 +199,7 @@ Replace `/absolute/path/to/Sokosumi-MCP/server.py` with your actual path and res
 
 ## Method 3: Claude Code Plugin
 
-This repository also ships a Claude Code plugin named `sokosumi`. The plugin registers the hosted Sokosumi MCP server and adds slash skills for agents, coworkers, tasks, jobs, Hannah, Elena, research, and market workflows.
+This repository also ships a Claude Code plugin named `sokosumi`. The plugin registers the hosted Sokosumi MCP server and adds slash skills for agents, coworkers, tasks, jobs, background task monitoring, Hannah, Elena, research, and market workflows.
 
 ### Install from this repository as a marketplace
 
@@ -219,6 +219,8 @@ Claude Code plugin skills are namespaced by plugin name. Use:
 /sokosumi:research Find a research agent for this brief...
 /sokosumi:market Build a market analysis plan for this product.
 ```
+
+Hannah and Elena automatically start a background monitor for every task they create, so a long-running task reports back on its own when it finishes or needs you — no manual status checks. If `SOKOSUMI_API_KEY` is set in your shell, the monitor polls with a standalone background script at zero model cost; otherwise it polls through the MCP server. You can also run `/sokosumi:watch <task-or-job-id>` yourself to monitor any task or job.
 
 To create optional bare project aliases such as `/hannah`, `/elena`, `/research`, and `/market`, run:
 
@@ -253,7 +255,7 @@ Do not commit API keys or OAuth tokens. Use the hosted OAuth flow for normal usa
 
 | Variable | Required | Description | Default |
 |----------|----------|-------------|---------|
-| `SOKOSUMI_API_KEY` | Local stdio only | Your Sokosumi API key | None |
+| `SOKOSUMI_API_KEY` | Optional | Your Sokosumi API key. Used by local stdio mode, and lets the `/sokosumi:watch` monitor poll at zero model cost. | None |
 | `SOKOSUMI_NETWORK` | No | Network selection (mainnet or preprod) | `mainnet` |
 | `SOKOSUMI_API_BASE_URL` | No | Override the Sokosumi API base URL | None |
 | `SOKOSUMI_MAINNET_API_BASE_URL` | No | Mainnet API base URL | `https://api.sokosumi.com` |
