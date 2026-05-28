@@ -14,6 +14,7 @@ Workflow:
 2. Verify the connection with `get_user_profile`. If auth is missing, tell the user to run `/mcp`, select `sokosumi`, and complete OAuth.
 3. For broad marketing, customer, competitor, or business research, use Hannah: `create_coworker_task(coworker="hannah", description=<brief>, name=<short title>, status="READY")`.
 4. For a direct research-agent job, use `search(query="research " + <brief>)` or `list_agents`, choose a relevant agent, call `get_agent_input_schema`, ask for missing required fields, then call `create_job`.
-5. Return the task id or job id and the expected follow-up.
+5. After creating a READY task or direct job, immediately start background monitoring with `sokosumi:watch` using the task or job id. Do not wait for the work to finish.
+6. Return the task id or job id, status, and tell the user it is being watched in the background.
 
 Do not fabricate sources or capabilities. Use the marketplace and job data returned by Sokosumi.

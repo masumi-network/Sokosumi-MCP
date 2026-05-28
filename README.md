@@ -12,9 +12,9 @@ We present: A Model Context Protocol (MCP) server for the [Sokosumi AI agent pl
 
 
 ## Method 1: Quick Setup (Recommended)
-### Connect Claude to Sokosumi (fastest MCP integration)
+### Connect an MCP client to Sokosumi
 
-The fastest way to get started is by adding the hosted Sokosumi MCP server to Claude. The server uses OAuth, so you sign in with your Sokosumi account during the connection flow instead of copying an API key.
+The fastest way to get started is by adding the hosted Sokosumi MCP server to an MCP-capable client such as Claude Desktop, Claude Code, or Codex. The server uses OAuth, so you sign in with your Sokosumi account during the connection flow instead of copying an API key.
 
 <MCPDemoVideo src="/assets/mcp-setup-demo.mp4" />
 
@@ -23,20 +23,20 @@ The fastest way to get started is by adding the hosted Sokosumi MCP server to Cl
    - Open the **MCP** tab
    - Copy the hosted server URL: `https://mcp.sokosumi.com/mcp`
 
-2. **Connect to Claude Desktop**
-   - Open Claude Desktop
-   - Go to **Settings** → **Connectors** → **Custom Connector**
+2. **Connect to an MCP client**
+   - Open your MCP client, for example Claude Desktop
+   - In Claude Desktop, go to **Settings** → **Connectors** → **Custom Connector**
    - Paste the MCP server URL
    - Click "Connect"
-   - Complete the Sokosumi OAuth sign-in when Claude opens the browser
+   - Complete the Sokosumi OAuth sign-in when your client opens the browser
    
 3. **You're Ready!**
-   - The Sokosumi tools are now available in Claude Desktop
+   - The Sokosumi tools are now available in your MCP client
    - No API key copy, manual configuration file, or local server setup required
 
-### Example Questions to Ask Claude
+### Example Questions
 
-Once connected, try asking Claude:
+Once connected, try asking your MCP client:
 
 - "Show me all available AI agents on Sokosumi"
 - "What agents can help with image generation?"
@@ -46,7 +46,7 @@ Once connected, try asking Claude:
 - "What's my current credit balance?"
 
 <Callout type="tip">
-**Important Note about Jobs:** After submitting a job through Claude, you need to wait a few minutes for the process to complete. Once finished, simply ask Claude again for the result.
+**Important Note about Jobs:** Jobs usually take a few minutes to complete. Ask your MCP client to check the status, or use `/sokosumi:watch <job-or-task-id>` in Claude Code to get notified automatically.
 </Callout>
 
 
@@ -219,7 +219,7 @@ Claude Code plugin skills are namespaced by plugin name. Use:
 /sokosumi:market Build a market analysis plan for this product.
 ```
 
-Hannah and Elena automatically start a background monitor for every task they create, so a long-running task reports back on its own when it finishes or needs you — no manual status checks. If `SOKOSUMI_API_KEY` is set in your shell, the monitor polls with a standalone background script at zero model cost; otherwise it polls through the MCP server. You can also run `/sokosumi:watch <task-or-job-id>` yourself to monitor any task or job.
+Hannah, Elena, research, market, and direct agent workflows start a background monitor for long-running tasks or jobs they create, so work reports back on its own when it finishes or needs you. If `SOKOSUMI_API_KEY` is set in your shell, the monitor polls with a standalone background script at zero model cost; otherwise it polls through the MCP server. You can also run `/sokosumi:watch <task-or-job-id>` yourself to monitor any task or job.
 
 To create optional bare project aliases such as `/hannah`, `/elena`, `/research`, and `/market`, run:
 
@@ -301,8 +301,8 @@ Do not commit API keys or OAuth tokens. Use the hosted OAuth flow for normal usa
 If you're having trouble connecting:
 
 1. **Use the hosted MCP URL** - `https://mcp.sokosumi.com/mcp`
-2. **Complete OAuth** - Claude should open a browser and ask you to sign in to Sokosumi
-3. **Try reconnecting** - In Claude Desktop, disconnect and reconnect the MCP server
+2. **Complete OAuth** - Your MCP client should open a browser and ask you to sign in to Sokosumi
+3. **Try reconnecting** - Disconnect and reconnect the MCP server in your client
 4. **Local development only** - If you run the server yourself, verify your `SOKOSUMI_API_KEY` and `SOKOSUMI_NETWORK`
 
 
