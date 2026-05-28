@@ -21,6 +21,7 @@ from starlette.routing import Route
 from contextvars import ContextVar
 
 from oauth import (
+    MCP_SERVER_URL,
     SOKOSUMI_USERINFO_ENDPOINT,
     validate_access_token,
     get_protected_resource_metadata,
@@ -103,13 +104,13 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 response = await call_next(request)
                 return self._cleanup_and_return(response, api_token, network_token, user_token)
 
-            # Try Bearer token authentication. JWTs are MCP OAuth tokens issued
-            # by this server; non-JWT bearer values are passed through as direct
-            # Sokosumi API/OAuth tokens for compatibility with clients that only
-            # expose a Bearer token field.
+            # Try Bearer token authentication. MCP OAuth tokens are JWTs issued
+            # by this server. Other bearer values, including Sokosumi tokens that
+            # happen to use JWT format, are passed through as direct Sokosumi
+            # API/OAuth tokens for clients that only expose a Bearer token field.
             bearer_token = self._extract_bearer_token(request)
             if bearer_token:
-                if not self._is_probably_jwt(bearer_token):
+                if not self._is_mcp_access_token(bearer_token):
                     api_token = current_api_key.set(bearer_token)
                     api_keys["current"] = bearer_token
                     logger.info(
@@ -182,9 +183,32 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             return auth_header[7:]  # Remove "Bearer " prefix
         return None
 
-    def _is_probably_jwt(self, token: str) -> bool:
-        """Return true when a bearer value has the compact JWT shape."""
-        return token.count(".") == 2
+    def _is_mcp_access_token(self, token: str) -> bool:
+        """Return true only for JWTs issued by this MCP server."""
+        if token.count(".") != 2:
+            return False
+
+        try:
+            payload = jwt.decode(
+                token,
+                options={
+                    "verify_signature": False,
+                    "verify_exp": False,
+                    "verify_iat": False,
+                    "verify_nbf": False,
+                    "verify_aud": False,
+                    "verify_iss": False,
+                },
+            )
+        except jwt.InvalidTokenError:
+            return False
+
+        audience = payload.get("aud")
+        has_expected_audience = (
+            audience == MCP_SERVER_URL
+            or (isinstance(audience, list) and MCP_SERVER_URL in audience)
+        )
+        return payload.get("iss") == MCP_SERVER_URL and has_expected_audience
 
     def _unauthorized_response(self, detail: str) -> Response:
         """Return a 401 Unauthorized response with WWW-Authenticate header."""
