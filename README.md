@@ -101,8 +101,8 @@ pip install -r requirements.txt
 
 #### Step 6: Get Your API Key
 
-1. Visit [Account Settings](https://app.sokosumi.com/account)
-2. Scroll down to the API Keys section
+1. Go to [Connections](https://app.sokosumi.com/connections)
+2. Open the API Keys tab
 3. Generate or copy your API key
 
 #### Step 7: Configure Environment Variables
@@ -194,7 +194,7 @@ For local development, add to your Claude Desktop MCP configuration:
 
 Replace `/absolute/path/to/Sokosumi-MCP/server.py` with your actual path and restart Claude Desktop.
 
-**Note:** This method is only for local development. For production use, we recommend Method 1 (MCP Link Generation) above.
+**Note:** This method is only for local development. For production use, we recommend Method 1 (hosted MCP connection) above.
 
 ## Method 3: Claude Code Plugin
 
