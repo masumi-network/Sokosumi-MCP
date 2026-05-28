@@ -111,6 +111,10 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             bearer_token = self._extract_bearer_token(request)
             if bearer_token:
                 if not self._is_mcp_access_token(bearer_token):
+                    if not await self._validate_sokosumi_bearer_token(bearer_token, network):
+                        logger.warning("Invalid direct Bearer token")
+                        return self._unauthorized_response("Invalid bearer token")
+
                     api_token = current_api_key.set(bearer_token)
                     api_keys["current"] = bearer_token
                     logger.info(
@@ -209,6 +213,35 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             or (isinstance(audience, list) and MCP_SERVER_URL in audience)
         )
         return payload.get("iss") == MCP_SERVER_URL and has_expected_audience
+
+    async def _validate_sokosumi_bearer_token(self, token: str, network: str) -> bool:
+        """Validate a direct Sokosumi bearer token before allowing MCP access."""
+        base_url = get_base_url(network)
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                for path in ("/v1/users/me", "/v1/coworkers/me"):
+                    response = await client.get(
+                        f"{base_url}{path}",
+                        headers=headers,
+                        timeout=10.0,
+                    )
+                    if 200 <= response.status_code < 300:
+                        return True
+                    if response.status_code not in (401, 403):
+                        logger.warning(
+                            "Unexpected Sokosumi bearer validation response: %s %s",
+                            path,
+                            response.status_code,
+                        )
+        except httpx.HTTPError as e:
+            logger.warning("Sokosumi bearer validation failed: %s", e)
+
+        return False
 
     def _unauthorized_response(self, detail: str) -> Response:
         """Return a 401 Unauthorized response with WWW-Authenticate header."""
