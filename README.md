@@ -6,7 +6,7 @@ We present: A Model Context Protocol (MCP) server for the [Sokosumi AI agent pl
 ## Features
 
 - **Two Setup Options** – Choose the best method for your needs:
-  - **Method 1: Instant MCP Connection** – Generate a link and connect to Claude in seconds
+  - **Method 1: Instant MCP Connection** – Connect to the hosted MCP server with OAuth
   - **Method 2: Local Development** – Run your own server for customization and testing
 - **Always Up-to-Date** – Uses the latest technology standards for reliable performance.
 
@@ -14,26 +14,25 @@ We present: A Model Context Protocol (MCP) server for the [Sokosumi AI agent pl
 ## Method 1: Quick Setup (Recommended)
 ### Connect Claude to Sokosumi (fastest MCP integration)
 
-The fastest way to get started is by generating an MCP link directly from the Sokosumi app and connecting it to Claude:
+The fastest way to get started is by adding the hosted Sokosumi MCP server to Claude. The server uses OAuth, so you sign in with your Sokosumi account during the connection flow instead of copying an API key.
 
 <MCPDemoVideo src="/assets/mcp-setup-demo.mp4" />
 
-1. **Generate MCP Link**
-   - Go to your [Sokosumi app](https://app.sokosumi.com)
-   - Click on your profile menu
-   - Select "MCP" from the menu options   
-   - Click "Generate Your Sokosumi MCP URL" button
-   - Copy the generated connection URL   
+1. **Copy the MCP Server URL**
+   - Go to [app.sokosumi.com/connections](https://app.sokosumi.com/connections)
+   - Open the **MCP** tab
+   - Copy the hosted server URL: `https://mcp.sokosumi.com/mcp`
 
 2. **Connect to Claude Desktop**
    - Open Claude Desktop
    - Go to **Settings** → **Connectors** → **Custom Connector**
-   - Paste your copied connection URL
+   - Paste the MCP server URL
    - Click "Connect"
+   - Complete the Sokosumi OAuth sign-in when Claude opens the browser
    
 3. **You're Ready!**
    - The Sokosumi tools are now available in Claude Desktop
-   - No manual configuration files or local server setup required
+   - No API key copy, manual configuration file, or local server setup required
 
 ### Example Questions to Ask Claude
 
@@ -301,10 +300,10 @@ Do not commit API keys or OAuth tokens. Use the hosted OAuth flow for normal usa
 
 If you're having trouble connecting:
 
-1. **Double-check your MCP link** - Make sure you copied the complete link including the API key parameter
-2. **Verify your API key** - Check that your API key is active in your [Sokosumi Account Settings](https://app.sokosumi.com/account)
+1. **Use the hosted MCP URL** - `https://mcp.sokosumi.com/mcp`
+2. **Complete OAuth** - Claude should open a browser and ask you to sign in to Sokosumi
 3. **Try reconnecting** - In Claude Desktop, disconnect and reconnect the MCP server
-4. **Check network** - Ensure you're using the correct network (mainnet/preprod) for your account
+4. **Local development only** - If you run the server yourself, verify your `SOKOSUMI_API_KEY` and `SOKOSUMI_NETWORK`
 
 
 ### Advanced Troubleshooting
