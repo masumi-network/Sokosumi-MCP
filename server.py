@@ -603,7 +603,7 @@ async def list_agents() -> Dict[str, Any]:
     """
     api_key = get_current_api_key()
     if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+        return auth_error()
 
     base_url = get_base_url()
     url = f"{base_url}/v1/agents"
@@ -646,7 +646,7 @@ async def get_agent_input_schema(agent_id: str) -> Dict[str, Any]:
     """
     api_key = get_current_api_key()
     if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+        return auth_error()
 
     base_url = get_base_url()
     url = f"{base_url}/v1/agents/{agent_id}/input-schema"
@@ -722,7 +722,7 @@ async def create_job(
     """
     api_key = get_current_api_key()
     if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+        return auth_error()
 
     schema_response = await sokosumi_api_request(
         "GET",
@@ -767,7 +767,7 @@ async def get_job(job_id: str) -> Dict[str, Any]:
     """
     api_key = get_current_api_key()
     if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+        return auth_error()
 
     base_url = get_base_url()
     url = f"{base_url}/v1/jobs/{job_id}"
@@ -811,7 +811,7 @@ async def list_agent_jobs(agent_id: str) -> Dict[str, Any]:
     """
     api_key = get_current_api_key()
     if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+        return auth_error()
 
     base_url = get_base_url()
     url = f"{base_url}/v1/agents/{agent_id}/jobs"
@@ -857,7 +857,7 @@ async def get_user_profile() -> Dict[str, Any]:
     """
     api_key = get_current_api_key()
     if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+        return auth_error()
 
     base_url = get_base_url()
     url = f"{base_url}/v1/users/me"
@@ -1323,7 +1323,7 @@ async def search(query: str) -> Dict[str, Any]:
         return {
             "content": [{
                 "type": "text",
-                "text": json.dumps({"error": "No API key found. Please connect with ?api_key=xxx in URL"})
+                "text": json.dumps(auth_error())
             }]
         }
 
@@ -1420,7 +1420,7 @@ async def fetch(id: str) -> Dict[str, Any]:
         return {
             "content": [{
                 "type": "text",
-                "text": json.dumps({"error": "No API key found. Please connect with ?api_key=xxx in URL"})
+                "text": json.dumps(auth_error())
             }]
         }
 
