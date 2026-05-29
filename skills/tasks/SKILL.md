@@ -14,4 +14,4 @@ Workflow:
 2. If the request includes a task id, call `get_task`, `list_task_events`, and `list_task_jobs`.
 3. If no task id is present, call `list_tasks`, filtering by coworker or status when the user mentions one.
 4. Summarize status, latest activity, linked jobs, and the next action. Keep task ids in the response.
-5. If a task is still running and the user wants to be notified when it finishes, start background monitoring with the `sokosumi:watch` skill.
+5. If a task is still running, start background monitoring with the `sokosumi:watch` skill unless it is already being watched.

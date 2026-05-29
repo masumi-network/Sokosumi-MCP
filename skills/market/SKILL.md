@@ -15,4 +15,5 @@ Workflow:
 3. Resolve Hannah with `get_coworker(coworker="hannah")`.
 4. Create a READY task with `create_coworker_task(coworker="hannah", description=<brief>, name=<short title>, status="READY")`.
 5. If Hannah is unavailable, search agents with marketing, market research, SEO, audience, or competitor terms and follow the direct agent job workflow.
-6. Return the task or job id and status.
+6. After creating a READY task or direct job, immediately start background monitoring with `sokosumi:watch` using the task or job id. Do not wait for the work to finish.
+7. Return the task or job id, status, and tell the user it is being watched in the background.

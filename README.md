@@ -6,38 +6,37 @@ We present: A Model Context Protocol (MCP) server for the [Sokosumi AI agent pl
 ## Features
 
 - **Two Setup Options** – Choose the best method for your needs:
-  - **Method 1: Instant MCP Connection** – Generate a link and connect to Claude in seconds
+  - **Method 1: Instant MCP Connection** – Connect to the hosted MCP server with OAuth
   - **Method 2: Local Development** – Run your own server for customization and testing
 - **Always Up-to-Date** – Uses the latest technology standards for reliable performance.
 
 
 ## Method 1: Quick Setup (Recommended)
-### Connect Claude to Sokosumi (fastest MCP integration)
+### Connect an MCP client to Sokosumi
 
-The fastest way to get started is by generating an MCP link directly from the Sokosumi app and connecting it to Claude:
+The fastest way to get started is by adding the hosted Sokosumi MCP server to an MCP-capable client such as Claude Desktop, Claude Code, or Codex. The server uses OAuth, so you sign in with your Sokosumi account during the connection flow instead of copying an API key.
 
 <MCPDemoVideo src="/assets/mcp-setup-demo.mp4" />
 
-1. **Generate MCP Link**
-   - Go to your [Sokosumi app](https://app.sokosumi.com)
-   - Click on your profile menu
-   - Select "MCP" from the menu options   
-   - Click "Generate Your Sokosumi MCP URL" button
-   - Copy the generated connection URL   
+1. **Copy the MCP Server URL**
+   - Go to [app.sokosumi.com/connections](https://app.sokosumi.com/connections)
+   - Open the **MCP** tab
+   - Copy the hosted server URL: `https://mcp.sokosumi.com/mcp`
 
-2. **Connect to Claude Desktop**
-   - Open Claude Desktop
-   - Go to **Settings** → **Connectors** → **Custom Connector**
-   - Paste your copied connection URL
+2. **Connect to an MCP client**
+   - Open your MCP client, for example Claude Desktop
+   - In Claude Desktop, go to **Settings** → **Connectors** → **Custom Connector**
+   - Paste the MCP server URL
    - Click "Connect"
+   - Complete the Sokosumi OAuth sign-in when your client opens the browser
    
 3. **You're Ready!**
-   - The Sokosumi tools are now available in Claude Desktop
-   - No manual configuration files or local server setup required
+   - The Sokosumi tools are now available in your MCP client
+   - No API key copy, manual configuration file, or local server setup required
 
-### Example Questions to Ask Claude
+### Example Questions
 
-Once connected, try asking Claude:
+Once connected, try asking your MCP client:
 
 - "Show me all available AI agents on Sokosumi"
 - "What agents can help with image generation?"
@@ -47,7 +46,7 @@ Once connected, try asking Claude:
 - "What's my current credit balance?"
 
 <Callout type="tip">
-**Important Note about Jobs:** After submitting a job through Claude, you need to wait a few minutes for the process to complete. Once finished, simply ask Claude again for the result.
+**Important Note about Jobs:** Jobs usually take a few minutes to complete. Ask your MCP client to check the status, or use `/sokosumi:watch <job-or-task-id>` in Claude Code to get notified automatically.
 </Callout>
 
 
@@ -102,8 +101,8 @@ pip install -r requirements.txt
 
 #### Step 6: Get Your API Key
 
-1. Visit [Account Settings](https://app.sokosumi.com/account)
-2. Scroll down to the API Keys section
+1. Go to [Connections](https://app.sokosumi.com/connections)
+2. Open the API Keys tab
 3. Generate or copy your API key
 
 #### Step 7: Configure Environment Variables
@@ -195,7 +194,7 @@ For local development, add to your Claude Desktop MCP configuration:
 
 Replace `/absolute/path/to/Sokosumi-MCP/server.py` with your actual path and restart Claude Desktop.
 
-**Note:** This method is only for local development. For production use, we recommend Method 1 (MCP Link Generation) above.
+**Note:** This method is only for local development. For production use, we recommend Method 1 (hosted MCP connection) above.
 
 ## Method 3: Claude Code Plugin
 
@@ -220,7 +219,7 @@ Claude Code plugin skills are namespaced by plugin name. Use:
 /sokosumi:market Build a market analysis plan for this product.
 ```
 
-Hannah and Elena automatically start a background monitor for every task they create, so a long-running task reports back on its own when it finishes or needs you — no manual status checks. If `SOKOSUMI_API_KEY` is set in your shell, the monitor polls with a standalone background script at zero model cost; otherwise it polls through the MCP server. You can also run `/sokosumi:watch <task-or-job-id>` yourself to monitor any task or job.
+Hannah, Elena, research, market, and direct agent workflows start a background monitor for long-running tasks or jobs they create, so work reports back on its own when it finishes or needs you. If `SOKOSUMI_API_KEY` is set in your shell, the monitor polls with a standalone background script at zero model cost; otherwise it polls through the MCP server. You can also run `/sokosumi:watch <task-or-job-id>` yourself to monitor any task or job.
 
 To create optional bare project aliases such as `/hannah`, `/elena`, `/research`, and `/market`, run:
 
@@ -301,10 +300,10 @@ Do not commit API keys or OAuth tokens. Use the hosted OAuth flow for normal usa
 
 If you're having trouble connecting:
 
-1. **Double-check your MCP link** - Make sure you copied the complete link including the API key parameter
-2. **Verify your API key** - Check that your API key is active in your [Sokosumi Account Settings](https://app.sokosumi.com/account)
-3. **Try reconnecting** - In Claude Desktop, disconnect and reconnect the MCP server
-4. **Check network** - Ensure you're using the correct network (mainnet/preprod) for your account
+1. **Use the hosted MCP URL** - `https://mcp.sokosumi.com/mcp`
+2. **Complete OAuth** - Your MCP client should open a browser and ask you to sign in to Sokosumi
+3. **Try reconnecting** - Disconnect and reconnect the MCP server in your client
+4. **Local development only** - If you run the server yourself, verify your `SOKOSUMI_API_KEY` and `SOKOSUMI_NETWORK`
 
 
 ### Advanced Troubleshooting

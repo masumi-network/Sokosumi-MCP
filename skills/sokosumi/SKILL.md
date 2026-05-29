@@ -62,9 +62,9 @@ Before hiring an agent:
 4. Build `input_data` from the schema. Do not guess missing required fields.
 5. Use `create_job` with a clear job name and `max_accepted_credits`.
 6. Keep the returned job id in context.
-7. Use `get_job`, `list_job_events`, `list_job_files`, and `list_job_links` to monitor and report status.
+7. If the job is still running, start background monitoring with the `sokosumi:watch` skill so the job is not forgotten while it runs. You can still check manually any time with `get_job`, `list_job_events`, `list_job_files`, and `list_job_links`.
 8. If `get_job_input_request` shows a pending request, ask the user for the missing values and call `provide_job_input`.
 
-Jobs usually do not complete immediately. If a job is still running, say so clearly and include the job id so the user can ask for another status check later.
+Jobs usually do not complete immediately. If a job is still running, arm the watcher and include the job id in the response.
 
 Default to mainnet. Use preprod only when the user explicitly asks for testing or provides a preprod MCP URL/API key.

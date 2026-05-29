@@ -21,6 +21,7 @@ from starlette.routing import Route
 from contextvars import ContextVar
 
 from oauth import (
+    MCP_SERVER_URL,
     SOKOSUMI_USERINFO_ENDPOINT,
     validate_access_token,
     get_protected_resource_metadata,
@@ -64,14 +65,15 @@ current_api_key: ContextVar[Optional[str]] = ContextVar('current_api_key', defau
 current_network: ContextVar[Optional[str]] = ContextVar('current_network', default=None)
 current_user: ContextVar[Optional[Dict[str, Any]]] = ContextVar('current_user', default=None)
 
-# Middleware for authentication (API key or OAuth Bearer token)
+# Middleware for authentication (API key, direct Bearer token, or OAuth Bearer JWT)
 class AuthenticationMiddleware(BaseHTTPMiddleware):
     """
     Authentication middleware supporting dual auth:
-    1. API key (query param ?api_key= or header x-api-key)
-    2. OAuth 2.1 Bearer token (Authorization: Bearer <jwt>)
+    1. API key (query param ?api_key= or header x-api-key/token)
+    2. Direct Sokosumi token (Authorization: Bearer <api key or access token>)
+    3. OAuth 2.1 Bearer token (Authorization: Bearer <jwt>)
 
-    Priority: API key takes precedence over Bearer token.
+    Priority: explicit API key takes precedence over Bearer token.
     If neither is provided/valid, returns 401 with WWW-Authenticate header.
     """
 
@@ -102,9 +104,26 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 response = await call_next(request)
                 return self._cleanup_and_return(response, api_token, network_token, user_token)
 
-            # Try Bearer token authentication
+            # Try Bearer token authentication. MCP OAuth tokens are JWTs issued
+            # by this server. Other bearer values, including Sokosumi tokens that
+            # happen to use JWT format, are passed through as direct Sokosumi
+            # API/OAuth tokens for clients that only expose a Bearer token field.
             bearer_token = self._extract_bearer_token(request)
             if bearer_token:
+                if not self._is_mcp_access_token(bearer_token):
+                    if not await self._validate_sokosumi_bearer_token(bearer_token, network):
+                        logger.warning("Invalid direct Bearer token")
+                        return self._unauthorized_response("Invalid bearer token")
+
+                    api_token = current_api_key.set(bearer_token)
+                    api_keys["current"] = bearer_token
+                    logger.info(
+                        "Authenticated via direct Bearer token: %s...",
+                        bearer_token[:8],
+                    )
+                    response = await call_next(request)
+                    return self._cleanup_and_return(response, api_token, network_token, user_token)
+
                 try:
                     user_payload = await validate_access_token(bearer_token)
                     user_token = current_user.set(user_payload)
@@ -143,13 +162,19 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
 
     def _extract_api_key(self, request: Request) -> Optional[str]:
         """Extract API key from query param or header."""
-        # Check query parameter first
-        api_key = request.query_params.get('api_key')
+        # Check query parameter first. `api_key` is the documented legacy
+        # remote URL form; the aliases accept older/generated variants safely.
+        api_key = (
+            request.query_params.get('api_key')
+            or request.query_params.get('apiKey')
+            or request.query_params.get('token')
+            or request.query_params.get('access_token')
+        )
         if api_key:
             return api_key
 
-        # Check x-api-key header
-        api_key = request.headers.get('x-api-key')
+        # Check API key headers
+        api_key = request.headers.get('x-api-key') or request.headers.get('token')
         if api_key:
             return api_key
 
@@ -161,6 +186,62 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         if auth_header.lower().startswith('bearer '):
             return auth_header[7:]  # Remove "Bearer " prefix
         return None
+
+    def _is_mcp_access_token(self, token: str) -> bool:
+        """Return true only for JWTs issued by this MCP server."""
+        if token.count(".") != 2:
+            return False
+
+        try:
+            payload = jwt.decode(
+                token,
+                options={
+                    "verify_signature": False,
+                    "verify_exp": False,
+                    "verify_iat": False,
+                    "verify_nbf": False,
+                    "verify_aud": False,
+                    "verify_iss": False,
+                },
+            )
+        except jwt.InvalidTokenError:
+            return False
+
+        audience = payload.get("aud")
+        has_expected_audience = (
+            audience == MCP_SERVER_URL
+            or (isinstance(audience, list) and MCP_SERVER_URL in audience)
+        )
+        return payload.get("iss") == MCP_SERVER_URL and has_expected_audience
+
+    async def _validate_sokosumi_bearer_token(self, token: str, network: str) -> bool:
+        """Validate a direct Sokosumi bearer token before allowing MCP access."""
+        base_url = get_base_url(network)
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                for path in ("/v1/users/me", "/v1/coworkers/me"):
+                    response = await client.get(
+                        f"{base_url}{path}",
+                        headers=headers,
+                        timeout=10.0,
+                    )
+                    if 200 <= response.status_code < 300:
+                        return True
+                    if response.status_code not in (401, 403):
+                        logger.warning(
+                            "Unexpected Sokosumi bearer validation response: %s %s",
+                            path,
+                            response.status_code,
+                        )
+        except httpx.HTTPError as e:
+            logger.warning("Sokosumi bearer validation failed: %s", e)
+
+        return False
 
     def _unauthorized_response(self, detail: str) -> Response:
         """Return a 401 Unauthorized response with WWW-Authenticate header."""
@@ -522,7 +603,7 @@ async def list_agents() -> Dict[str, Any]:
     """
     api_key = get_current_api_key()
     if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+        return auth_error()
 
     base_url = get_base_url()
     url = f"{base_url}/v1/agents"
@@ -565,7 +646,7 @@ async def get_agent_input_schema(agent_id: str) -> Dict[str, Any]:
     """
     api_key = get_current_api_key()
     if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+        return auth_error()
 
     base_url = get_base_url()
     url = f"{base_url}/v1/agents/{agent_id}/input-schema"
@@ -641,7 +722,7 @@ async def create_job(
     """
     api_key = get_current_api_key()
     if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+        return auth_error()
 
     schema_response = await sokosumi_api_request(
         "GET",
@@ -686,7 +767,7 @@ async def get_job(job_id: str) -> Dict[str, Any]:
     """
     api_key = get_current_api_key()
     if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+        return auth_error()
 
     base_url = get_base_url()
     url = f"{base_url}/v1/jobs/{job_id}"
@@ -730,7 +811,7 @@ async def list_agent_jobs(agent_id: str) -> Dict[str, Any]:
     """
     api_key = get_current_api_key()
     if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+        return auth_error()
 
     base_url = get_base_url()
     url = f"{base_url}/v1/agents/{agent_id}/jobs"
@@ -776,7 +857,7 @@ async def get_user_profile() -> Dict[str, Any]:
     """
     api_key = get_current_api_key()
     if not api_key:
-        return {"error": "No API key found. Please connect with ?api_key=xxx in URL"}
+        return auth_error()
 
     base_url = get_base_url()
     url = f"{base_url}/v1/users/me"
@@ -1242,7 +1323,7 @@ async def search(query: str) -> Dict[str, Any]:
         return {
             "content": [{
                 "type": "text",
-                "text": json.dumps({"error": "No API key found. Please connect with ?api_key=xxx in URL"})
+                "text": json.dumps(auth_error())
             }]
         }
 
@@ -1339,7 +1420,7 @@ async def fetch(id: str) -> Dict[str, Any]:
         return {
             "content": [{
                 "type": "text",
-                "text": json.dumps({"error": "No API key found. Please connect with ?api_key=xxx in URL"})
+                "text": json.dumps(auth_error())
             }]
         }
 
